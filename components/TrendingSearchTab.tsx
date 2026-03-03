@@ -1,8 +1,9 @@
 'use client';
 
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import Image from 'next/image';
 import { TrendingVideo, TrendSearchRange, searchTrendingVideos, formatNumber, formatDuration } from '@/lib/youtube';
+import { loadSavedKeywords, saveKeyword, removeSavedKeyword } from '@/lib/storage';
 
 type SortMode = 'velocity' | 'views' | 'newest' | 'oldest';
 type MaxViewsFilter = 'all' | '100k' | '500k' | '1m';
@@ -59,10 +60,14 @@ function VelocityBar({ vpd, maxVpd }: { vpd: number; maxVpd: number }) {
 const EXAMPLE_QUERIES_JA = ['一人旅 国内', '筋トレ 初心者', '料理 時短', 'ASMR 睡眠', 'vlog 日常', '英語 勉強法'];
 const EXAMPLE_QUERIES_EN = ['solo travel', 'workout beginner', 'easy cooking', 'ASMR sleep', 'daily vlog', 'study with me'];
 
-// YouTube Shorts の閾値 (秒)
-const SHORTS_THRESHOLD = 60;
+// ショート動画の閾値 (秒) - アプリ内の SHORT_VIDEO_THRESHOLD と統一
+const SHORTS_THRESHOLD = 180;
 
-export default function TrendingSearchTab() {
+interface TrendingSearchTabProps {
+  onKeywordsChange?: (count: number) => void;
+}
+
+export default function TrendingSearchTab({ onKeywordsChange }: TrendingSearchTabProps) {
   const [query, setQuery] = useState('');
   const [dateRange, setDateRange] = useState<TrendSearchRange>('1month');
   const [sortMode, setSortMode] = useState<SortMode>('velocity');
@@ -75,6 +80,54 @@ export default function TrendingSearchTab() {
   const [searchedRange, setSearchedRange] = useState<TrendSearchRange>('1month');
   const [error, setError] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // キーワード保存
+  const [savedKeywords, setSavedKeywords] = useState<string[]>([]);
+  const [isChecking, setIsChecking] = useState(false);
+  const [checkResults, setCheckResults] = useState<{ keyword: string; topVideo: TrendingVideo | null }[]>([]);
+  const [showNotification, setShowNotification] = useState(false);
+
+  useEffect(() => {
+    setSavedKeywords(loadSavedKeywords());
+  }, []);
+
+  const handleSaveKeyword = () => {
+    const trimmed = query.trim();
+    if (!trimmed) return;
+    saveKeyword(trimmed);
+    const next = loadSavedKeywords();
+    setSavedKeywords(next);
+    onKeywordsChange?.(next.length);
+  };
+
+  const handleRemoveKeyword = (kw: string) => {
+    removeSavedKeyword(kw);
+    const next = loadSavedKeywords();
+    setSavedKeywords(next);
+    onKeywordsChange?.(next.length);
+  };
+
+  const handleCheckAll = async () => {
+    if (savedKeywords.length === 0) return;
+    setIsChecking(true);
+    setCheckResults([]);
+    setShowNotification(false);
+
+    const results: { keyword: string; topVideo: TrendingVideo | null }[] = [];
+    for (const kw of savedKeywords) {
+      try {
+        const res = await searchTrendingVideos(kw, '1week', language, 5);
+        results.push({ keyword: kw, topVideo: res[0] ?? null });
+      } catch {
+        results.push({ keyword: kw, topVideo: null });
+      }
+    }
+
+    setCheckResults(results);
+    const hasResults = results.some((r) => r.topVideo !== null);
+    if (hasResults) setShowNotification(true);
+    setIsChecking(false);
+  };
 
   const handleSearch = async (q?: string, lang?: LanguageFilter) => {
     const searchQuery = (q ?? query).trim();
@@ -268,6 +321,101 @@ export default function TrendingSearchTab() {
           </div>
         </div>
       </div>
+
+      {/* キーワード保存ボタン（検索後に表示） */}
+      {query.trim() && (
+        <div className="flex items-center justify-end">
+          <button
+            onClick={handleSaveKeyword}
+            className={`text-xs px-3 py-1.5 rounded-lg border transition-all flex items-center gap-1.5 ${
+              savedKeywords.includes(query.trim())
+                ? 'border-yellow-300 bg-yellow-50 text-yellow-700'
+                : 'border-gray-300 text-gray-500 hover:border-yellow-400 hover:text-yellow-600 hover:bg-yellow-50'
+            }`}
+          >
+            {savedKeywords.includes(query.trim()) ? '★ 保存済み' : '☆ このキーワードを保存'}
+          </button>
+        </div>
+      )}
+
+      {/* 保存キーワード */}
+      {savedKeywords.length > 0 && (
+        <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <p className="text-sm font-semibold text-yellow-800">保存中のキーワード ({savedKeywords.length}件)</p>
+            <button
+              onClick={handleCheckAll}
+              disabled={isChecking}
+              className="text-xs px-3 py-1.5 bg-yellow-500 text-white rounded-lg hover:bg-yellow-600 disabled:opacity-50 transition-colors font-medium"
+            >
+              {isChecking ? 'チェック中...' : '一括チェック (直近1週間)'}
+            </button>
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            {savedKeywords.map((kw) => (
+              <div key={kw} className="flex items-center gap-1 px-2.5 py-1 bg-white border border-yellow-300 rounded-full">
+                <button
+                  onClick={() => {
+                    setQuery(kw);
+                    handleSearch(kw);
+                  }}
+                  className="text-xs text-gray-700 hover:text-orange-600 transition-colors font-medium"
+                >
+                  {kw}
+                </button>
+                <button
+                  onClick={() => handleRemoveKeyword(kw)}
+                  className="text-gray-400 hover:text-red-500 text-xs leading-none ml-0.5"
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+          </div>
+
+          {/* 一括チェック結果 */}
+          {checkResults.length > 0 && (
+            <div className="border-t border-yellow-200 pt-3 space-y-2">
+              <p className="text-xs font-medium text-yellow-800">直近1週間の急上昇トップ</p>
+              {checkResults.map(({ keyword, topVideo }) => (
+                <div key={keyword} className="flex items-center gap-3 bg-white rounded-lg px-3 py-2 border border-yellow-100">
+                  <span className="text-xs font-semibold text-orange-600 min-w-[80px] truncate">{keyword}</span>
+                  {topVideo ? (
+                    <a
+                      href={`https://www.youtube.com/watch?v=${topVideo.videoId}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex-1 min-w-0 text-xs text-gray-700 hover:text-orange-600 truncate"
+                    >
+                      {topVideo.title}
+                    </a>
+                  ) : (
+                    <span className="text-xs text-gray-400">該当なし</span>
+                  )}
+                  {topVideo && (
+                    <span className="text-xs font-semibold text-gray-600 whitespace-nowrap flex-shrink-0">
+                      {formatNumber(topVideo.viewsPerDay)}/日
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* 通知バナー */}
+      {showNotification && (
+        <div className="bg-green-50 border border-green-300 rounded-xl p-4 flex items-start gap-3">
+          <span className="text-green-600 text-lg flex-shrink-0">🔔</span>
+          <div className="flex-1">
+            <p className="text-sm font-semibold text-green-800">急上昇中の動画があります！</p>
+            <p className="text-xs text-green-700 mt-0.5">保存キーワードで直近1週間に急上昇している動画が見つかりました。上の結果を確認してください。</p>
+          </div>
+          <button onClick={() => setShowNotification(false)} className="text-green-500 hover:text-green-700 text-sm">×</button>
+        </div>
+      )}
 
       {/* エラー */}
       {error && (

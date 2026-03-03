@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { AppSettings, ChannelResult, DateRange } from '@/types';
-import { loadSettings, saveSettings } from '@/lib/storage';
+import { loadSettings, saveSettings, loadSavedKeywords } from '@/lib/storage';
 import { analyzeChannel } from '@/lib/youtube';
 import SettingsPanel from '@/components/SettingsPanel';
 import ChannelCard from '@/components/ChannelCard';
@@ -49,9 +49,11 @@ export default function Home() {
   const [selectedChannelIndex, setSelectedChannelIndex] = useState(0);
   const [displayLimit, setDisplayLimit] = useState<DisplayLimit>(30);
   const [analyzeVideoId, setAnalyzeVideoId] = useState<string | null>(null);
+  const [savedKeywordCount, setSavedKeywordCount] = useState(0);
 
   useEffect(() => {
     setSettings(loadSettings());
+    setSavedKeywordCount(loadSavedKeywords().length);
   }, []);
 
   const handleAnalyzeVideo = (videoId: string) => {
@@ -139,6 +141,11 @@ export default function Home() {
                 }`}
               >
                 {tab === 'trending' ? '🔍 ' : ''}{TAB_LABELS[tab]}
+              {tab === 'trending' && savedKeywordCount > 0 && (
+                <span className="ml-1 inline-flex items-center justify-center w-4 h-4 text-xs font-bold bg-yellow-400 text-yellow-900 rounded-full">
+                  {savedKeywordCount}
+                </span>
+              )}
               </button>
             ))}
             <div className="w-px bg-gray-200 mx-1 self-stretch" />
@@ -330,7 +337,7 @@ export default function Home() {
         )}
 
         {activeTab === 'trending' && (
-          <TrendingSearchTab />
+          <TrendingSearchTab onKeywordsChange={(count) => setSavedKeywordCount(count)} />
         )}
       </main>
     </div>

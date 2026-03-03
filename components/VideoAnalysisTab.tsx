@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import Image from 'next/image';
-import { VideoAnalysisData, fetchVideoAnalysis, formatNumber, formatDuration } from '@/lib/youtube';
+import { VideoAnalysisData, RecentVideoPoint, fetchVideoAnalysis, formatNumber, formatDuration } from '@/lib/youtube';
 
 interface VideoAnalysisTabProps {
   initialVideoId?: string | null;
@@ -34,6 +34,80 @@ function TitleBadge({ ok, label }: { ok: boolean; label: string }) {
     }`}>
       {ok ? '✓' : '–'} {label}
     </span>
+  );
+}
+
+function formatShortDate(dateStr: string): string {
+  const d = new Date(dateStr);
+  return `${d.getMonth() + 1}/${d.getDate()}`;
+}
+
+function ChannelTrendChart({ videos, avgViews }: { videos: RecentVideoPoint[]; avgViews: number }) {
+  if (videos.length === 0) return null;
+
+  const maxViews = Math.max(...videos.map((v) => v.viewCount), 1);
+  // 表示は最大20本（多すぎると見にくい）
+  const display = videos.slice(-20);
+
+  return (
+    <div className="bg-white border border-gray-200 rounded-xl p-5">
+      <h3 className="text-sm font-bold text-gray-900 mb-1">チャンネル 再生数推移 (直近{display.length}本)</h3>
+      <p className="text-xs text-gray-400 mb-4">古い順 → 新しい順 / 青: 分析動画</p>
+
+      {/* バーチャート */}
+      <div className="flex items-end gap-1 h-36 overflow-x-auto pb-1">
+        {display.map((v) => {
+          const barPct = maxViews > 0 ? (v.viewCount / maxViews) * 100 : 0;
+          const avgPct = maxViews > 0 ? (avgViews / maxViews) * 100 : 0;
+          return (
+            <div key={v.videoId} className="flex flex-col items-center gap-0.5 min-w-[28px] flex-1 relative group">
+              {/* ツールチップ */}
+              <div className="absolute bottom-full mb-1 left-1/2 -translate-x-1/2 hidden group-hover:block z-10 pointer-events-none">
+                <div className="bg-gray-900 text-white text-xs rounded px-2 py-1 whitespace-nowrap max-w-[200px]">
+                  <p className="truncate max-w-[180px]">{v.title}</p>
+                  <p className="font-bold">{formatNumber(v.viewCount)}回</p>
+                  <p className="text-gray-400">{formatShortDate(v.publishedAt)}</p>
+                </div>
+              </div>
+
+              {/* バー */}
+              <div className="w-full flex items-end" style={{ height: '100px' }}>
+                <div
+                  className={`w-full rounded-t transition-all ${
+                    v.isTarget
+                      ? 'bg-blue-500 ring-2 ring-blue-300'
+                      : barPct >= 80 ? 'bg-green-400'
+                      : barPct >= 40 ? 'bg-blue-200'
+                      : 'bg-gray-200'
+                  }`}
+                  style={{ height: `${Math.max(3, barPct)}%` }}
+                />
+              </div>
+
+              {/* 日付 */}
+              <span className={`text-xs ${v.isTarget ? 'text-blue-600 font-bold' : 'text-gray-400'} truncate w-full text-center`}>
+                {formatShortDate(v.publishedAt)}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* 平均ライン説明 */}
+      <div className="flex items-center gap-4 mt-3 pt-3 border-t border-gray-100">
+        <div className="flex items-center gap-1.5">
+          <div className="w-3 h-3 bg-blue-500 rounded-sm ring-2 ring-blue-300" />
+          <span className="text-xs text-gray-500">分析対象動画</span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <div className="w-3 h-3 bg-green-400 rounded-sm" />
+          <span className="text-xs text-gray-500">上位20%</span>
+        </div>
+        <div className="ml-auto text-xs text-gray-500">
+          チャンネル平均: <span className="font-semibold">{formatNumber(avgViews)}</span>回
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -262,6 +336,11 @@ export default function VideoAnalysisTab({ initialVideoId }: VideoAnalysisTabPro
               </div>
             )}
           </div>
+
+          {/* チャンネル推移チャート */}
+          {data.recentVideos.length > 1 && (
+            <ChannelTrendChart videos={data.recentVideos} avgViews={data.channelAvgViews} />
+          )}
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {/* 詳細スタッツ */}

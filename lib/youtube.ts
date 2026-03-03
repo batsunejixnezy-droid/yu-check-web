@@ -321,6 +321,14 @@ export interface TrendingVideo {
 // 個別動画分析
 // ============================================================
 
+export interface RecentVideoPoint {
+  videoId: string;
+  title: string;
+  viewCount: number;
+  publishedAt: string;
+  isTarget: boolean; // 分析対象の動画かどうか
+}
+
 export interface VideoAnalysisData {
   videoId: string;
   title: string;
@@ -342,6 +350,7 @@ export interface VideoAnalysisData {
   channelVideoCount: number;
   diffFromAvg: number;
   channelRank: number;
+  recentVideos: RecentVideoPoint[]; // チャンネルの直近動画一覧（推移グラフ用）
 }
 
 export function extractVideoId(input: string): string | null {
@@ -401,6 +410,29 @@ export async function fetchVideoAnalysis(urlOrId: string): Promise<VideoAnalysis
     channelRank = sorted.findIndex((c) => viewCount >= c) + 1;
   }
 
+  // 直近動画一覧（推移グラフ用）- 古い順にソート
+  const recentVideoPoints: RecentVideoPoint[] = [...recentVideos]
+    .sort((a, b) => new Date(a.publishedAt).getTime() - new Date(b.publishedAt).getTime())
+    .map((r) => ({
+      videoId: r.videoId,
+      title: r.title,
+      viewCount: r.viewCount,
+      publishedAt: r.publishedAt,
+      isTarget: r.videoId === videoId,
+    }));
+
+  // 分析対象動画がrecentVideosに含まれていない場合は追加
+  if (!recentVideoPoints.find((p) => p.isTarget)) {
+    recentVideoPoints.push({
+      videoId,
+      title: v.snippet.title,
+      viewCount,
+      publishedAt,
+      isTarget: true,
+    });
+    recentVideoPoints.sort((a, b) => new Date(a.publishedAt).getTime() - new Date(b.publishedAt).getTime());
+  }
+
   return {
     videoId,
     title: v.snippet.title,
@@ -422,6 +454,7 @@ export async function fetchVideoAnalysis(urlOrId: string): Promise<VideoAnalysis
     channelVideoCount: recentVideos.length,
     diffFromAvg,
     channelRank,
+    recentVideos: recentVideoPoints,
   };
 }
 
@@ -448,10 +481,14 @@ export async function searchTrendingVideos(
   let pageToken = '';
   let remaining = maxResults;
 
+  // 言語に対応するregionCodeを設定
+  const regionCode = language === 'ja' ? 'JP' : language === 'en' ? 'US' : undefined;
+
   while (remaining > 0) {
     const batchSize = Math.min(remaining, 50);
     let searchUrl = `${YOUTUBE_API_BASE}/search?part=snippet&q=${encodeURIComponent(query)}&type=video&publishedAfter=${encodeURIComponent(publishedAfter)}&maxResults=${batchSize}&order=viewCount`;
     if (language !== 'all') searchUrl += `&relevanceLanguage=${language}`;
+    if (regionCode) searchUrl += `&regionCode=${regionCode}`;
     if (pageToken) searchUrl += `&pageToken=${pageToken}`;
 
     const data = await fetchWithErrorHandling(searchUrl);
