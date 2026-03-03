@@ -599,5 +599,11 @@ export async function searchTrendingVideos(
     });
   }
 
-  return allVideos.sort((a, b) => b.viewsPerDay - a.viewsPerDay);
+  // クライアント側で言語フィルタリング（APIのhintだけでは不十分なため）
+  const filtered = language === 'all' ? allVideos : allVideos.filter((v) => {
+    const hasJapanese = /[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF\uFF00-\uFFEF]/.test(v.title);
+    return language === 'ja' ? hasJapanese : !hasJapanese;
+  });
+
+  return filtered.sort((a, b) => b.viewsPerDay - a.viewsPerDay);
 }
