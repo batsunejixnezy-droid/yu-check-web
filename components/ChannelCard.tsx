@@ -48,6 +48,12 @@ export default function ChannelCard({ result, displayLimit, dateRange, onAnalyze
         videosWithViews.length
       : 0;
 
+  // 月間推定再生回数 = 全動画の (viewCount / 経過日数) × 30 の合計
+  const estimatedMonthlyViews = allVideos.reduce((sum, v) => {
+    const daysOld = Math.max(1, (Date.now() - new Date(v.publishedAt).getTime()) / (1000 * 60 * 60 * 24));
+    return sum + (v.viewCount / daysOld) * 30;
+  }, 0);
+
   const score = result.scoreBreakdown?.total ?? null;
 
   // スコアに応じた色
@@ -90,6 +96,14 @@ export default function ChannelCard({ result, displayLimit, dateRange, onAnalyze
             <p className="text-xs text-gray-500 mt-0.5">
               登録者 {formatNumber(result.subscriberCount)}人
             </p>
+            {allVideos.length > 0 && (
+              <p className="text-xs text-gray-500 mt-0.5">
+                月間推定再生 ≈{' '}
+                <span className="font-semibold text-gray-700">
+                  {formatNumber(Math.round(estimatedMonthlyViews))}回
+                </span>
+              </p>
+            )}
           </div>
         </div>
 
