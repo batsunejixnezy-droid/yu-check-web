@@ -68,8 +68,8 @@ export function clearExpiredCache(): void {
 
 // TTL定数
 export const TTL = {
-  CHANNEL_ANALYSIS: 60 * 60 * 1000,       // 1時間
-  TRENDING_SEARCH:  30 * 60 * 1000,        // 30分
-  VIDEO_ANALYSIS:   60 * 60 * 1000,        // 1時間
-  CHANNEL_DATA:     2 * 60 * 60 * 1000,    // 2時間
+  CHANNEL_ANALYSIS: 4 * 60 * 60 * 1000,   // 4時間
+  TRENDING_SEARCH:  3 * 60 * 60 * 1000,   // 3時間
+  VIDEO_ANALYSIS:   4 * 60 * 60 * 1000,   // 4時間
+  CHANNEL_DATA:     6 * 60 * 60 * 1000,   // 6時間
 } as const;

@@ -525,7 +525,7 @@ export async function searchTrendingVideos(
   query: string,
   dateRange: TrendSearchRange = '1month',
   language: 'ja' | 'en' | 'all' = 'ja',
-  maxResults: number = 100
+  maxResults: number = 50
 ): Promise<TrendingVideo[]> {
   const publishedAfter = trendRangeToISO(dateRange);
   const searchItems: { id: { videoId: string } }[] = [];
