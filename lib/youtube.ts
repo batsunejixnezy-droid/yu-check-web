@@ -1,4 +1,4 @@
-import { VideoData, VideoWithMetrics, ChannelResult } from '@/types';
+import { VideoData, VideoWithMetrics, ChannelResult, DateRange } from '@/types';
 import { calculateChannelScore, analyzePostingTimes } from '@/lib/analysis';
 
 const YOUTUBE_API_BASE = '/api/youtube';
@@ -28,6 +28,19 @@ export function formatNumber(num: number): string {
   if (num >= 100000000) return `${(num / 100000000).toFixed(1)}億`;
   if (num >= 10000) return `${(num / 10000).toFixed(1)}万`;
   return num.toLocaleString('ja-JP');
+}
+
+/** 日付範囲を ISO 8601 文字列に変換 */
+export function dateRangeToISO(range: DateRange): string | undefined {
+  if (range === 'all') return undefined;
+  const daysMap: Record<string, number> = {
+    '1month': 30,
+    '3months': 90,
+    '6months': 180,
+    '1year': 365,
+  };
+  const days = daysMap[range];
+  return new Date(Date.now() - days * 86400000).toISOString();
 }
 
 async function fetchWithErrorHandling(url: string) {
@@ -84,9 +97,9 @@ export async function fetchChannelData(
 
 export async function fetchRecentVideos(
   channelId: string,
-  maxResults: number = 50
+  maxResults: number = 50,
+  publishedAfter?: string
 ): Promise<VideoData[]> {
-  // ページネーションで動画を取得
   const searchItems: { id: { videoId: string } }[] = [];
   let pageToken = '';
   let remaining = maxResults;
@@ -94,9 +107,8 @@ export async function fetchRecentVideos(
   while (remaining > 0) {
     const batchSize = Math.min(remaining, 50);
     let searchUrl = `${YOUTUBE_API_BASE}/search?part=snippet&channelId=${channelId}&order=date&maxResults=${batchSize}&type=video`;
-    if (pageToken) {
-      searchUrl += `&pageToken=${pageToken}`;
-    }
+    if (pageToken) searchUrl += `&pageToken=${pageToken}`;
+    if (publishedAfter) searchUrl += `&publishedAfter=${encodeURIComponent(publishedAfter)}`;
 
     const searchData = await fetchWithErrorHandling(searchUrl);
 
@@ -121,7 +133,6 @@ export async function fetchRecentVideos(
     allVideoDetails.push(...videosData.items);
   }
 
-  // まず全動画の再生数を取得して平均を計算（isViral判定用）
   const rawVideos = allVideoDetails.map((video: {
     id: string;
     snippet: {
@@ -161,7 +172,6 @@ export async function fetchRecentVideos(
     };
   });
 
-  // チャンネル内平均再生数を計算してisViralを設定
   const totalViews = rawVideos.reduce((sum, v) => sum + v.viewCount, 0);
   const avgViews = rawVideos.length > 0 ? totalViews / rawVideos.length : 0;
 
@@ -244,16 +254,24 @@ export function calculateMetricsForChannel(
 
 export async function analyzeChannel(
   channelId: string,
-  maxVideos: number = 30
+  maxVideos: number = 30,
+  dateRange?: DateRange
 ): Promise<ChannelResult> {
-  // チャンネル情報を取得
   const channelData = await fetchChannelData(channelId);
 
-  // 動画を取得（ロング・ショート各maxVideos本確保するため多めに取得）
-  const fetchCount = Math.min(maxVideos * 6, 300);
-  const videos = await fetchRecentVideos(channelData.actualChannelId, fetchCount);
+  // 期間指定がある場合は全件取得、ない場合は本数×6
+  let fetchCount: number;
+  let publishedAfter: string | undefined;
 
-  // subscriberCountを各動画に設定
+  if (dateRange && dateRange !== 'all') {
+    publishedAfter = dateRangeToISO(dateRange);
+    fetchCount = 500; // 期間内を全件取得
+  } else {
+    fetchCount = Math.min(maxVideos * 6, 300);
+  }
+
+  const videos = await fetchRecentVideos(channelData.actualChannelId, fetchCount, publishedAfter);
+
   videos.forEach((v) => {
     v.subscriberCount = channelData.subscriberCount;
     v.channelName = channelData.channelTitle;
@@ -261,10 +279,11 @@ export async function analyzeChannel(
 
   const { longVideos, shortVideos } = categorizeVideos(videos);
 
-  const longVideosSliced = longVideos.slice(0, maxVideos);
-  const shortVideosSliced = shortVideos.slice(0, maxVideos);
+  // 期間指定時は全件表示（maxVideosはdisplayLimitで制御）
+  // 期間なし時は maxVideos でカット
+  const longVideosSliced = dateRange && dateRange !== 'all' ? longVideos : longVideos.slice(0, maxVideos);
+  const shortVideosSliced = dateRange && dateRange !== 'all' ? shortVideos : shortVideos.slice(0, maxVideos);
 
-  // スコアと投稿時間分析（全動画を使用）
   const scoreBreakdown = calculateChannelScore(videos, channelData.subscriberCount);
   const postingAnalysis = analyzePostingTimes(videos);
 
@@ -277,4 +296,110 @@ export async function analyzeChannel(
     scoreBreakdown,
     postingAnalysis,
   };
+}
+
+// ============================================================
+// 穴場キーワード探索
+// ============================================================
+
+export interface TrendingVideo {
+  videoId: string;
+  title: string;
+  channelName: string;
+  channelId: string;
+  publishedAt: string;
+  viewCount: number;
+  likeCount: number;
+  commentCount: number;
+  duration: number;
+  thumbnailUrl: string;
+  viewsPerDay: number;
+  daysOld: number;
+}
+
+export type TrendSearchRange = '1week' | '2weeks' | '1month' | '3months';
+
+export function trendRangeToISO(range: TrendSearchRange): string {
+  const daysMap: Record<TrendSearchRange, number> = {
+    '1week': 7,
+    '2weeks': 14,
+    '1month': 30,
+    '3months': 90,
+  };
+  return new Date(Date.now() - daysMap[range] * 86400000).toISOString();
+}
+
+export async function searchTrendingVideos(
+  query: string,
+  dateRange: TrendSearchRange = '1month',
+  maxResults: number = 100
+): Promise<TrendingVideo[]> {
+  const publishedAfter = trendRangeToISO(dateRange);
+  const searchItems: { id: { videoId: string } }[] = [];
+  let pageToken = '';
+  let remaining = maxResults;
+
+  while (remaining > 0) {
+    const batchSize = Math.min(remaining, 50);
+    let searchUrl = `${YOUTUBE_API_BASE}/search?part=snippet&q=${encodeURIComponent(query)}&type=video&publishedAfter=${encodeURIComponent(publishedAfter)}&maxResults=${batchSize}&order=viewCount`;
+    if (pageToken) searchUrl += `&pageToken=${pageToken}`;
+
+    const data = await fetchWithErrorHandling(searchUrl);
+    if (!data.items || data.items.length === 0) break;
+
+    searchItems.push(...data.items);
+    remaining -= data.items.length;
+    if (!data.nextPageToken) break;
+    pageToken = data.nextPageToken;
+  }
+
+  if (searchItems.length === 0) return [];
+
+  const now = Date.now();
+  const allVideos: TrendingVideo[] = [];
+
+  for (let i = 0; i < searchItems.length; i += 50) {
+    const batch = searchItems.slice(i, i + 50);
+    const videoIds = batch.map((item: { id: { videoId: string } }) => item.id.videoId).join(',');
+    const videosUrl = `${YOUTUBE_API_BASE}/videos?part=snippet,statistics,contentDetails&id=${videoIds}`;
+    const videosData = await fetchWithErrorHandling(videosUrl);
+
+    videosData.items?.forEach((video: {
+      id: string;
+      snippet: {
+        title: string;
+        publishedAt: string;
+        thumbnails: { medium: { url: string } };
+        channelTitle: string;
+        channelId: string;
+      };
+      contentDetails: { duration: string };
+      statistics: {
+        viewCount: string;
+        likeCount?: string;
+        commentCount?: string;
+      };
+    }) => {
+      const publishedMs = new Date(video.snippet.publishedAt).getTime();
+      const daysOld = Math.max(1, (now - publishedMs) / 86400000);
+      const viewCount = parseInt(video.statistics.viewCount) || 0;
+
+      allVideos.push({
+        videoId: video.id,
+        title: video.snippet.title,
+        channelName: video.snippet.channelTitle,
+        channelId: video.snippet.channelId,
+        publishedAt: video.snippet.publishedAt,
+        viewCount,
+        likeCount: parseInt(video.statistics.likeCount || '0') || 0,
+        commentCount: parseInt(video.statistics.commentCount || '0') || 0,
+        duration: parseDuration(video.contentDetails.duration),
+        thumbnailUrl: video.snippet.thumbnails.medium?.url || '',
+        viewsPerDay: Math.round(viewCount / daysOld),
+        daysOld: Math.floor(daysOld),
+      });
+    });
+  }
+
+  return allVideos.sort((a, b) => b.viewsPerDay - a.viewsPerDay);
 }

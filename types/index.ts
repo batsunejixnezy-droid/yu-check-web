@@ -59,7 +59,10 @@ export interface ChannelResult {
   postingAnalysis?: PostingAnalysis;
 }
 
+export type DateRange = '1month' | '3months' | '6months' | '1year' | 'all';
+
 export interface AppSettings {
   channels: Channel[];
   maxVideos: number;
+  dateRange: DateRange;
 }

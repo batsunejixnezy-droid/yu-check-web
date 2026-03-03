@@ -1,16 +1,25 @@
 'use client';
 
 import { useState } from 'react';
-import { ChannelResult } from '@/types';
+import { ChannelResult, DateRange } from '@/types';
 import { formatNumber } from '@/lib/youtube';
 import VideoTable from './VideoTable';
+
+const DATE_RANGE_LABELS: Record<string, string> = {
+  '1month': '直近1ヶ月',
+  '3months': '直近3ヶ月',
+  '6months': '直近6ヶ月',
+  '1year': '直近1年',
+  'all': '全期間',
+};
 
 interface ChannelCardProps {
   result: ChannelResult;
   displayLimit?: number;
+  dateRange?: DateRange;
 }
 
-export default function ChannelCard({ result, displayLimit }: ChannelCardProps) {
+export default function ChannelCard({ result, displayLimit, dateRange }: ChannelCardProps) {
   const [activeTab, setActiveTab] = useState<'long' | 'short'>('long');
 
   if (result.error) {
@@ -84,7 +93,12 @@ export default function ChannelCard({ result, displayLimit }: ChannelCardProps) 
         </div>
 
         <div className="flex flex-col items-end gap-1.5">
-          <div className="flex gap-1 text-xs">
+          <div className="flex gap-1 text-xs flex-wrap justify-end">
+            {dateRange && (
+              <span className="px-2 py-1 bg-gray-100 text-gray-600 rounded font-medium">
+                {DATE_RANGE_LABELS[dateRange] ?? dateRange}
+              </span>
+            )}
             <span className="px-2 py-1 bg-blue-50 text-blue-700 rounded">
               ロング {result.longVideos.length}本
             </span>

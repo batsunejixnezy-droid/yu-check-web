@@ -1,11 +1,11 @@
-import { AppSettings, Channel } from '@/types';
+import { AppSettings, Channel, DateRange } from '@/types';
 
 const STORAGE_KEY = 'yu-check-settings';
-
 
 const defaultSettings: AppSettings = {
   channels: [],
   maxVideos: 30,
+  dateRange: '3months',
 };
 
 export function loadSettings(): AppSettings {
@@ -39,5 +39,11 @@ export function removeChannel(id: string): void {
 export function updateMaxVideos(maxVideos: number): void {
   const settings = loadSettings();
   settings.maxVideos = maxVideos;
+  saveSettings(settings);
+}
+
+export function updateDateRange(dateRange: DateRange): void {
+  const settings = loadSettings();
+  settings.dateRange = dateRange;
   saveSettings(settings);
 }
