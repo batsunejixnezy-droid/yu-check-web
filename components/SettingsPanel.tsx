@@ -1,10 +1,9 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { AppSettings, Channel, DateRange } from '@/types';
 import { addChannel, removeChannel, updateMaxVideos, updateDateRange } from '@/lib/storage';
 import { fetchChannelData } from '@/lib/youtube';
-import { addApiKey, removeApiKey, getApiKeyStatus, getExhaustedCount } from '@/lib/apiKeyManager';
 
 interface SettingsPanelProps {
   settings: AppSettings;
@@ -23,34 +22,6 @@ export default function SettingsPanel({ settings, onSettingsChange }: SettingsPa
   const [channelInput, setChannelInput] = useState('');
   const [isAdding, setIsAdding] = useState(false);
   const [addError, setAddError] = useState('');
-
-  // APIキー管理
-  const [apiKeyInput, setApiKeyInput] = useState('');
-  const [apiKeyStatus, setApiKeyStatus] = useState<{ key: string; masked: string; exhausted: boolean }[]>([]);
-  const [exhaustedCount, setExhaustedCount] = useState(0);
-
-  useEffect(() => {
-    setApiKeyStatus(getApiKeyStatus());
-    setExhaustedCount(getExhaustedCount());
-  }, []);
-
-  const refreshApiKeyStatus = () => {
-    setApiKeyStatus(getApiKeyStatus());
-    setExhaustedCount(getExhaustedCount());
-  };
-
-  const handleAddApiKey = () => {
-    const trimmed = apiKeyInput.trim();
-    if (!trimmed) return;
-    addApiKey(trimmed);
-    setApiKeyInput('');
-    refreshApiKeyStatus();
-  };
-
-  const handleRemoveApiKey = (key: string) => {
-    removeApiKey(key);
-    refreshApiKeyStatus();
-  };
 
   const handleAddChannel = async () => {
     const input = channelInput.trim();
@@ -97,90 +68,6 @@ export default function SettingsPanel({ settings, onSettingsChange }: SettingsPa
 
   return (
     <div className="space-y-5">
-      {/* APIキー管理 */}
-      <div className="bg-white border border-gray-200 rounded-xl p-5">
-        <div className="flex items-start justify-between mb-1">
-          <h2 className="text-base font-semibold text-gray-900">YouTube APIキー</h2>
-          {exhaustedCount > 0 && (
-            <span className="text-xs px-2 py-0.5 bg-red-100 text-red-700 rounded-full font-medium">
-              {exhaustedCount}件 クォータ切れ
-            </span>
-          )}
-        </div>
-        <p className="text-xs text-gray-400 mb-4">
-          複数のAPIキーを登録するとクォータ切れ時に自動で切り替えます。
-          <a
-            href="https://console.cloud.google.com/apis/credentials"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-blue-500 hover:underline ml-1"
-          >
-            Google Cloud Console
-          </a>
-          で取得できます（無料）。
-        </p>
-
-        <div className="flex gap-2 mb-3">
-          <input
-            type="text"
-            value={apiKeyInput}
-            onChange={(e) => setApiKeyInput(e.target.value)}
-            placeholder="AIzaSy... (YouTube Data API v3 キー)"
-            className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            onKeyDown={(e) => e.key === 'Enter' && handleAddApiKey()}
-          />
-          <button
-            onClick={handleAddApiKey}
-            disabled={!apiKeyInput.trim()}
-            className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 disabled:opacity-40 transition-colors whitespace-nowrap font-medium"
-          >
-            追加
-          </button>
-        </div>
-
-        {apiKeyStatus.length > 0 ? (
-          <div className="space-y-2">
-            {apiKeyStatus.map(({ key, masked, exhausted }) => (
-              <div
-                key={key}
-                className={`flex items-center justify-between py-2 px-3 rounded-lg border ${
-                  exhausted ? 'bg-red-50 border-red-200' : 'bg-green-50 border-green-200'
-                }`}
-              >
-                <div className="flex items-center gap-2">
-                  <span className={`w-2 h-2 rounded-full flex-shrink-0 ${exhausted ? 'bg-red-500' : 'bg-green-500'}`} />
-                  <span className="text-xs font-mono text-gray-700">{masked}</span>
-                  <span className={`text-xs ${exhausted ? 'text-red-600 font-medium' : 'text-green-600'}`}>
-                    {exhausted ? 'クォータ切れ (明日リセット)' : '使用可能'}
-                  </span>
-                </div>
-                <button
-                  onClick={() => handleRemoveApiKey(key)}
-                  className="text-xs text-gray-400 hover:text-red-600 transition-colors ml-3"
-                >
-                  削除
-                </button>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
-            <p className="text-xs text-yellow-800 font-medium">APIキー未登録</p>
-            <p className="text-xs text-yellow-700 mt-0.5">
-              現在はサーバー側の共有APIキーを使用中。クォータ（1日10,000ユニット）を節約するため、ご自身のキーを登録することを推奨します。
-            </p>
-          </div>
-        )}
-
-        <div className="mt-3 p-3 bg-gray-50 rounded-lg">
-          <p className="text-xs text-gray-500 font-medium mb-1">クォータの目安</p>
-          <p className="text-xs text-gray-400">
-            検索 100ユニット / 動画詳細 1ユニット / チャンネル情報 1ユニット
-            → 3チャンネル分析 ≈ 500〜1,500ユニット
-          </p>
-        </div>
-      </div>
-
       {/* 取得期間 */}
       <div className="bg-white border border-gray-200 rounded-xl p-5">
         <h2 className="text-base font-semibold text-gray-900 mb-1">取得期間</h2>
