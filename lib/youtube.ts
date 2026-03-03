@@ -250,7 +250,7 @@ export async function analyzeChannel(
   const channelData = await fetchChannelData(channelId);
 
   // 動画を取得（ロング・ショート各maxVideos本確保するため多めに取得）
-  const fetchCount = Math.min(maxVideos * 4, 200);
+  const fetchCount = Math.min(maxVideos * 6, 300);
   const videos = await fetchRecentVideos(channelData.actualChannelId, fetchCount);
 
   // subscriberCountを各動画に設定

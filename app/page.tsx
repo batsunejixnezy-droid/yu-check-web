@@ -9,16 +9,21 @@ import ChannelCard from '@/components/ChannelCard';
 import ViralTab from '@/components/ViralTab';
 import PostingTimeTab from '@/components/PostingTimeTab';
 import KeywordTab from '@/components/KeywordTab';
+import VideoAnalysisTab from '@/components/VideoAnalysisTab';
 
-type Tab = 'analyze' | 'viral' | 'postingTime' | 'keyword' | 'settings';
+type Tab = 'analyze' | 'videoAnalysis' | 'viral' | 'postingTime' | 'keyword' | 'settings';
 
 const TAB_LABELS: Record<Tab, string> = {
   analyze: '分析',
-  viral: '急上昇動画',
+  videoAnalysis: '動画分析',
+  viral: '急上昇',
   postingTime: '投稿時間',
   keyword: 'キーワード',
   settings: '設定',
 };
+
+const DISPLAY_LIMITS = [10, 30, 50] as const;
+type DisplayLimit = (typeof DISPLAY_LIMITS)[number];
 
 export default function Home() {
   const [activeTab, setActiveTab] = useState<Tab>('analyze');
@@ -31,6 +36,7 @@ export default function Home() {
   const [progress, setProgress] = useState({ current: 0, total: 0, channelName: '' });
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
   const [selectedChannelIndex, setSelectedChannelIndex] = useState(0);
+  const [displayLimit, setDisplayLimit] = useState<DisplayLimit>(30);
 
   useEffect(() => {
     setSettings(loadSettings());
@@ -77,13 +83,12 @@ export default function Home() {
 
   const hasResults = results.length > 0;
 
-  // タブ順序（設定を右端に）
-  const mainTabs: Tab[] = ['analyze', 'viral', 'postingTime', 'keyword'];
+  const mainTabs: Tab[] = ['analyze', 'videoAnalysis', 'viral', 'postingTime', 'keyword'];
 
   return (
     <div className="min-h-screen bg-gray-50">
       {/* ヘッダー */}
-      <header className="bg-white border-b border-gray-200">
+      <header className="bg-white border-b border-gray-200 sticky top-0 z-10">
         <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 bg-red-600 rounded-lg flex items-center justify-center">
@@ -92,32 +97,32 @@ export default function Home() {
               </svg>
             </div>
             <h1 className="text-lg font-bold text-gray-900">ゆーちぇっく</h1>
-            <span className="text-xs text-gray-400">YouTubeライバル分析</span>
+            <span className="text-xs text-gray-400 hidden sm:inline">YouTubeライバル分析</span>
             <span className="text-xs px-1.5 py-0.5 bg-red-100 text-red-600 rounded font-medium">v2.0</span>
           </div>
 
           {/* タブ */}
-          <nav className="flex gap-1">
+          <nav className="flex gap-0.5 overflow-x-auto">
             {mainTabs.map((tab) => (
               <button
                 key={tab}
                 onClick={() => setActiveTab(tab)}
-                className={`px-3 py-1.5 text-sm rounded-md transition-colors ${
+                className={`px-3 py-1.5 text-sm rounded-md transition-colors whitespace-nowrap ${
                   activeTab === tab
-                    ? 'bg-gray-100 text-gray-900 font-medium'
-                    : 'text-gray-500 hover:text-gray-700'
+                    ? 'bg-gray-900 text-white font-medium'
+                    : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100'
                 }`}
               >
                 {TAB_LABELS[tab]}
               </button>
             ))}
-            <div className="w-px bg-gray-200 mx-1" />
+            <div className="w-px bg-gray-200 mx-1 self-stretch" />
             <button
               onClick={() => setActiveTab('settings')}
               className={`px-3 py-1.5 text-sm rounded-md transition-colors ${
                 activeTab === 'settings'
-                  ? 'bg-gray-100 text-gray-900 font-medium'
-                  : 'text-gray-500 hover:text-gray-700'
+                  ? 'bg-gray-900 text-white font-medium'
+                  : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100'
               }`}
             >
               {TAB_LABELS.settings}
@@ -134,25 +139,49 @@ export default function Home() {
         {activeTab === 'analyze' && (
           <div className="space-y-5">
             {/* 実行エリア */}
-            <div className="bg-white border border-gray-200 rounded-lg p-5">
-              <div className="flex items-center justify-between">
-                <div>
+            <div className="bg-white border border-gray-200 rounded-xl p-5">
+              <div className="flex items-center justify-between gap-4 flex-wrap">
+                <div className="flex items-center gap-4 flex-wrap">
                   <p className="text-sm text-gray-600">
-                    登録チャンネル: <span className="font-medium text-gray-900">{settings.channels.length}件</span>
-                    <span className="mx-2 text-gray-300">|</span>
-                    取得本数: <span className="font-medium text-gray-900">{settings.maxVideos}本</span>
+                    <span className="font-semibold text-gray-900">{settings.channels.length}</span>
+                    <span className="text-gray-400"> チャンネル</span>
+                    <span className="mx-2 text-gray-200">|</span>
+                    最大
+                    <span className="font-semibold text-gray-900 mx-1">{settings.maxVideos}</span>
+                    本/チャンネル
                     {lastUpdated && (
                       <>
-                        <span className="mx-2 text-gray-300">|</span>
-                        最終更新: <span className="text-gray-500">{lastUpdated}</span>
+                        <span className="mx-2 text-gray-200">|</span>
+                        <span className="text-gray-400">更新: {lastUpdated}</span>
                       </>
                     )}
                   </p>
+
+                  {/* 表示件数切り替え */}
+                  {hasResults && (
+                    <div className="flex items-center gap-1">
+                      <span className="text-xs text-gray-400 mr-1">表示:</span>
+                      {DISPLAY_LIMITS.map((n) => (
+                        <button
+                          key={n}
+                          onClick={() => setDisplayLimit(n)}
+                          className={`px-2.5 py-1 text-xs rounded-md transition-colors ${
+                            displayLimit === n
+                              ? 'bg-gray-900 text-white font-medium'
+                              : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                          }`}
+                        >
+                          {n}本
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
+
                 <button
                   onClick={handleAnalyze}
                   disabled={isLoading}
-                  className="px-5 py-2 bg-red-600 text-white text-sm font-medium rounded-md hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  className="px-5 py-2 bg-red-600 text-white text-sm font-semibold rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors shadow-sm"
                 >
                   {isLoading ? '分析中...' : '分析を実行'}
                 </button>
@@ -161,13 +190,13 @@ export default function Home() {
               {/* プログレス */}
               {isLoading && (
                 <div className="mt-4">
-                  <div className="flex justify-between text-xs text-gray-500 mb-1">
-                    <span>{progress.channelName} を取得中...</span>
+                  <div className="flex justify-between text-xs text-gray-500 mb-1.5">
+                    <span className="font-medium">{progress.channelName}</span>
                     <span>{progress.current} / {progress.total}</span>
                   </div>
                   <div className="w-full bg-gray-100 rounded-full h-1.5">
                     <div
-                      className="bg-red-500 h-1.5 rounded-full transition-all duration-300"
+                      className="bg-red-500 h-1.5 rounded-full transition-all duration-500"
                       style={{ width: `${(progress.current / progress.total) * 100}%` }}
                     />
                   </div>
@@ -177,13 +206,13 @@ export default function Home() {
 
             {/* 結果がない場合のガイド */}
             {!hasResults && !isLoading && (
-              <div className="text-center py-16 text-gray-400">
+              <div className="text-center py-20 text-gray-400">
                 <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
                   <svg className="w-8 h-8 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
                   </svg>
                 </div>
-                <p className="text-sm">
+                <p className="text-sm font-medium">
                   {settings.channels.length === 0
                     ? '設定タブでチャンネルを登録してください'
                     : '「分析を実行」ボタンを押してください'}
@@ -192,52 +221,62 @@ export default function Home() {
             )}
 
             {/* チャンネルタブ + 結果 */}
-            {results.length > 0 && (
-              <div className="space-y-4">
+            {hasResults && (
+              <div className="space-y-3">
                 {/* タブバー */}
                 <div className="overflow-x-auto">
-                  <div className="flex gap-1 min-w-max border-b border-gray-200 pb-0">
+                  <div className="flex gap-0.5 min-w-max border-b border-gray-200">
                     {results.map((result, index) => (
                       <button
                         key={result.channelId}
                         onClick={() => setSelectedChannelIndex(index)}
-                        className={`px-4 py-2 text-sm rounded-t-md border-b-2 transition-colors whitespace-nowrap ${
+                        className={`px-4 py-2.5 text-sm rounded-t-lg border-b-2 transition-all whitespace-nowrap ${
                           selectedChannelIndex === index
-                            ? 'border-red-600 text-red-600 font-medium bg-red-50'
+                            ? 'border-red-600 text-red-600 font-semibold bg-red-50'
                             : result.error
                             ? 'border-transparent text-red-400 hover:text-red-500'
-                            : 'border-transparent text-gray-500 hover:text-gray-700'
+                            : 'border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50'
                         }`}
                       >
                         {result.channelName}
-                        {result.error && <span className="ml-1 text-xs">(エラー)</span>}
+                        {result.error && <span className="ml-1 text-xs opacity-70">(エラー)</span>}
                       </button>
                     ))}
                   </div>
                 </div>
+
                 {/* 選択中チャンネルの結果 */}
                 {results[selectedChannelIndex] && (
-                  <ChannelCard result={results[selectedChannelIndex]} />
+                  <ChannelCard
+                    result={results[selectedChannelIndex]}
+                    displayLimit={displayLimit}
+                  />
                 )}
               </div>
             )}
           </div>
         )}
 
+        {activeTab === 'videoAnalysis' && (
+          <div className="bg-white border border-gray-200 rounded-xl p-5">
+            <VideoAnalysisTab results={results} />
+          </div>
+        )}
+
         {activeTab === 'viral' && (
-          <div className="bg-white border border-gray-200 rounded-lg p-5">
+          <div className="bg-white border border-gray-200 rounded-xl p-5">
             <ViralTab results={results} />
           </div>
         )}
 
         {activeTab === 'postingTime' && (
-          <div className="bg-white border border-gray-200 rounded-lg p-5">
+          <div className="bg-white border border-gray-200 rounded-xl p-5">
             <PostingTimeTab results={results} />
           </div>
         )}
 
         {activeTab === 'keyword' && (
-          <div className="bg-white border border-gray-200 rounded-lg p-5">
+          <div className="bg-white border border-gray-200 rounded-xl p-5">
             <KeywordTab results={results} />
           </div>
         )}

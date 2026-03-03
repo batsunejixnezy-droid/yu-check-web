@@ -7,9 +7,10 @@ import VideoTable from './VideoTable';
 
 interface ChannelCardProps {
   result: ChannelResult;
+  displayLimit?: number;
 }
 
-export default function ChannelCard({ result }: ChannelCardProps) {
+export default function ChannelCard({ result, displayLimit }: ChannelCardProps) {
   const [activeTab, setActiveTab] = useState<'long' | 'short'>('long');
 
   if (result.error) {
@@ -133,10 +134,10 @@ export default function ChannelCard({ result }: ChannelCardProps) {
       {/* テーブル */}
       <div className="px-5 py-4">
         {activeTab === 'long' && (
-          <VideoTable videos={result.longVideos} videoType="long" />
+          <VideoTable videos={result.longVideos} videoType="long" limit={displayLimit} />
         )}
         {activeTab === 'short' && (
-          <VideoTable videos={result.shortVideos} videoType="short" />
+          <VideoTable videos={result.shortVideos} videoType="short" limit={displayLimit} />
         )}
       </div>
     </div>

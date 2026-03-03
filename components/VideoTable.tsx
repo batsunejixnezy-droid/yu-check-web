@@ -7,6 +7,7 @@ import { formatDuration, formatNumber } from '@/lib/youtube';
 interface VideoTableProps {
   videos: VideoWithMetrics[];
   videoType: 'long' | 'short';
+  limit?: number;
 }
 
 function getRankBadgeClass(rank: number): string {
@@ -26,7 +27,8 @@ function formatDate(dateStr: string): string {
   return `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}`;
 }
 
-export default function VideoTable({ videos, videoType }: VideoTableProps) {
+export default function VideoTable({ videos, videoType, limit }: VideoTableProps) {
+  const displayedVideos = limit ? videos.slice(0, limit) : videos;
   if (videos.length === 0) {
     return (
       <p className="text-sm text-gray-400 py-4">該当する動画がありません</p>
@@ -47,7 +49,7 @@ export default function VideoTable({ videos, videoType }: VideoTableProps) {
           </tr>
         </thead>
         <tbody className="divide-y divide-gray-100">
-          {videos.map((video) => {
+          {displayedVideos.map((video) => {
             const viewDiff = video.viewCount - video.averageViews;
             const isPositive = viewDiff >= 0;
             return (
