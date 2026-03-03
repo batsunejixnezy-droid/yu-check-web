@@ -3,7 +3,10 @@ import { NextRequest, NextResponse } from 'next/server';
 const YOUTUBE_API_BASE = 'https://www.googleapis.com/youtube/v3';
 
 // 複数のサーバーAPIキー（環境変数で管理）
+// YOUTUBE_API_KEYS にカンマ区切りで複数登録可能
+// 旧来の YOUTUBE_API_KEY / _2 / _3 との後方互換も維持
 const SERVER_API_KEYS = [
+  ...(process.env.YOUTUBE_API_KEYS?.split(',').map((k) => k.trim()).filter(Boolean) ?? []),
   process.env.YOUTUBE_API_KEY,
   process.env.YOUTUBE_API_KEY_2,
   process.env.YOUTUBE_API_KEY_3,
