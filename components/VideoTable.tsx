@@ -41,17 +41,16 @@ export default function VideoTable({ videos, videoType }: VideoTableProps) {
             <th className="text-left py-2 pr-4 font-medium w-8">順位</th>
             <th className="text-left py-2 pr-4 font-medium min-w-[240px]">動画</th>
             <th className="text-right py-2 pr-4 font-medium">再生回数</th>
+            <th className="text-right py-2 pr-4 font-medium">平均比</th>
             <th className="text-right py-2 pr-4 font-medium">投稿日</th>
-            <th className="text-right py-2 pr-4 font-medium">長さ</th>
-            {videoType === 'long' ? (
-              <th className="text-right py-2 font-medium">登録者再生率</th>
-            ) : (
-              <th className="text-right py-2 font-medium">平均比</th>
-            )}
+            <th className="text-right py-2 font-medium">長さ</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-gray-100">
-          {videos.map((video) => (
+          {videos.map((video) => {
+            const viewDiff = video.viewCount - video.averageViews;
+            const isPositive = viewDiff >= 0;
+            return (
             <tr key={video.videoId} className="hover:bg-gray-50 transition-colors">
               <td className="py-3 pr-4">
                 <span
@@ -95,21 +94,23 @@ export default function VideoTable({ videos, videoType }: VideoTableProps) {
               <td className="py-3 pr-4 text-right font-medium text-gray-900">
                 {formatNumber(video.viewCount)}
               </td>
+              <td className="py-3 pr-4 text-right">
+                <span className={`text-sm font-medium ${getDiffClass(video.diffFromAverage)}`}>
+                  {isPositive ? '+' : ''}{formatNumber(viewDiff)}回
+                </span>
+                <span className={`block text-xs ${getDiffClass(video.diffFromAverage)}`}>
+                  ({isPositive ? '+' : ''}{video.diffFromAverage.toFixed(0)}%)
+                </span>
+              </td>
               <td className="py-3 pr-4 text-right text-gray-500">
                 {formatDate(video.publishedAt)}
               </td>
-              <td className="py-3 pr-4 text-right text-gray-500">
+              <td className="py-3 text-right text-gray-500">
                 {formatDuration(video.duration)}
               </td>
-              <td className="py-3 text-right">
-                <span className={`font-medium ${getDiffClass(video.diffFromAverage)}`}>
-                  {videoType === 'long'
-                    ? `${video.engagementRate.toFixed(1)}%`
-                    : `${video.diffFromAverage >= 0 ? '+' : ''}${video.diffFromAverage.toFixed(0)}%`}
-                </span>
-              </td>
             </tr>
-          ))}
+            );
+          })}
         </tbody>
       </table>
     </div>

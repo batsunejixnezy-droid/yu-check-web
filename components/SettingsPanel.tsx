@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { AppSettings, Channel } from '@/types';
 import { addChannel, removeChannel, updateMaxVideos } from '@/lib/storage';
+import { fetchChannelData } from '@/lib/youtube';
 
 interface SettingsPanelProps {
   settings: AppSettings;
@@ -11,23 +12,34 @@ interface SettingsPanelProps {
 
 export default function SettingsPanel({ settings, onSettingsChange }: SettingsPanelProps) {
   const [channelInput, setChannelInput] = useState('');
-  const [channelNameInput, setChannelNameInput] = useState('');
-  const [channelNoteInput, setChannelNoteInput] = useState('');
+  const [isAdding, setIsAdding] = useState(false);
+  const [addError, setAddError] = useState('');
 
-  const handleAddChannel = () => {
-    if (!channelInput.trim()) return;
-    const newChannel: Channel = {
-      id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
-      name: channelNameInput.trim() || channelInput.trim(),
-      channelId: channelInput.trim(),
-      note: channelNoteInput.trim(),
-    };
-    addChannel(newChannel);
-    const newSettings = { ...settings, channels: [...settings.channels, newChannel] };
-    onSettingsChange(newSettings);
-    setChannelInput('');
-    setChannelNameInput('');
-    setChannelNoteInput('');
+  const handleAddChannel = async () => {
+    const input = channelInput.trim();
+    if (!input) return;
+
+    setIsAdding(true);
+    setAddError('');
+
+    try {
+      const { channelTitle, actualChannelId } = await fetchChannelData(input);
+
+      const newChannel: Channel = {
+        id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        name: channelTitle,
+        channelId: actualChannelId,
+      };
+
+      addChannel(newChannel);
+      const newSettings = { ...settings, channels: [...settings.channels, newChannel] };
+      onSettingsChange(newSettings);
+      setChannelInput('');
+    } catch {
+      setAddError('チャンネルが見つかりません。チャンネルIDまたはハンドル名を確認してください。');
+    } finally {
+      setIsAdding(false);
+    }
   };
 
   const handleRemoveChannel = (id: string) => {
@@ -67,49 +79,31 @@ export default function SettingsPanel({ settings, onSettingsChange }: SettingsPa
       <div className="bg-white border border-gray-200 rounded-lg p-5">
         <h2 className="text-base font-semibold text-gray-900 mb-4">ライバルチャンネル登録</h2>
 
-        <div className="grid grid-cols-1 gap-3 mb-3">
-          <div>
-            <label className="block text-xs text-gray-600 mb-1">チャンネルID / ハンドル名 <span className="text-red-500">*</span></label>
-            <input
-              type="text"
-              value={channelInput}
-              onChange={(e) => setChannelInput(e.target.value)}
-              placeholder="UCxxxxxxxxxx または @channelname"
-              className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent"
-              onKeyDown={(e) => e.key === 'Enter' && handleAddChannel()}
-            />
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs text-gray-600 mb-1">表示名（省略可）</label>
-              <input
-                type="text"
-                value={channelNameInput}
-                onChange={(e) => setChannelNameInput(e.target.value)}
-                placeholder="チャンネルA"
-                className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent"
-              />
-            </div>
-            <div>
-              <label className="block text-xs text-gray-600 mb-1">メモ（省略可）</label>
-              <input
-                type="text"
-                value={channelNoteInput}
-                onChange={(e) => setChannelNoteInput(e.target.value)}
-                placeholder="メモ"
-                className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent"
-              />
-            </div>
-          </div>
+        <div className="flex gap-2 mb-2">
+          <input
+            type="text"
+            value={channelInput}
+            onChange={(e) => {
+              setChannelInput(e.target.value);
+              setAddError('');
+            }}
+            placeholder="UCxxxxxxxxxx または @channelname"
+            className="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent"
+            onKeyDown={(e) => e.key === 'Enter' && !isAdding && handleAddChannel()}
+            disabled={isAdding}
+          />
+          <button
+            onClick={handleAddChannel}
+            disabled={!channelInput.trim() || isAdding}
+            className="px-4 py-2 bg-red-600 text-white text-sm rounded-md hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors whitespace-nowrap"
+          >
+            {isAdding ? '取得中...' : '追加'}
+          </button>
         </div>
 
-        <button
-          onClick={handleAddChannel}
-          disabled={!channelInput.trim()}
-          className="px-4 py-2 bg-red-600 text-white text-sm rounded-md hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-        >
-          追加
-        </button>
+        {addError && (
+          <p className="text-xs text-red-500 mb-3">{addError}</p>
+        )}
 
         {/* チャンネル一覧 */}
         {settings.channels.length > 0 && (
@@ -122,9 +116,6 @@ export default function SettingsPanel({ settings, onSettingsChange }: SettingsPa
                 <div className="min-w-0">
                   <p className="text-sm font-medium text-gray-900 truncate">{channel.name}</p>
                   <p className="text-xs text-gray-500 truncate">{channel.channelId}</p>
-                  {channel.note && (
-                    <p className="text-xs text-gray-400 truncate">{channel.note}</p>
-                  )}
                 </div>
                 <button
                   onClick={() => handleRemoveChannel(channel.id)}

@@ -30,6 +30,7 @@ export default function Home() {
   const [isLoading, setIsLoading] = useState(false);
   const [progress, setProgress] = useState({ current: 0, total: 0, channelName: '' });
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
+  const [selectedChannelIndex, setSelectedChannelIndex] = useState(0);
 
   useEffect(() => {
     setSettings(loadSettings());
@@ -44,6 +45,7 @@ export default function Home() {
 
     setIsLoading(true);
     setResults([]);
+    setSelectedChannelIndex(0);
     setProgress({ current: 0, total: settings.channels.length, channelName: '' });
 
     const newResults: ChannelResult[] = [];
@@ -189,10 +191,36 @@ export default function Home() {
               </div>
             )}
 
-            {/* チャンネル結果 */}
-            {results.map((result) => (
-              <ChannelCard key={result.channelId} result={result} />
-            ))}
+            {/* チャンネルタブ + 結果 */}
+            {results.length > 0 && (
+              <div className="space-y-4">
+                {/* タブバー */}
+                <div className="overflow-x-auto">
+                  <div className="flex gap-1 min-w-max border-b border-gray-200 pb-0">
+                    {results.map((result, index) => (
+                      <button
+                        key={result.channelId}
+                        onClick={() => setSelectedChannelIndex(index)}
+                        className={`px-4 py-2 text-sm rounded-t-md border-b-2 transition-colors whitespace-nowrap ${
+                          selectedChannelIndex === index
+                            ? 'border-red-600 text-red-600 font-medium bg-red-50'
+                            : result.error
+                            ? 'border-transparent text-red-400 hover:text-red-500'
+                            : 'border-transparent text-gray-500 hover:text-gray-700'
+                        }`}
+                      >
+                        {result.channelName}
+                        {result.error && <span className="ml-1 text-xs">(エラー)</span>}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                {/* 選択中チャンネルの結果 */}
+                {results[selectedChannelIndex] && (
+                  <ChannelCard result={results[selectedChannelIndex]} />
+                )}
+              </div>
+            )}
           </div>
         )}
 

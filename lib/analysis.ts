@@ -135,15 +135,22 @@ const STOP_WORDS = new Set([
   'これ', 'それ', 'あの', 'この', 'その', 'あ', 'お', 'へ', 'ば', 'れ', 'せ',
   'さ', 'き', 'く', 'け', 'こ', 'す', 'そ', 'つ', 'ぬ', 'ふ', 'む', 'め',
   'も', 'ら', 'り', 'る', 'わ', 'ん', 'です', 'ます', 'ない', 'ある', 'いる',
-  'する', 'なる', 'れる', 'られる', 'させる', 'ました', 'ません', 'です',
+  'する', 'なる', 'れる', 'られる', 'させる', 'ました', 'ません',
   'だ', 'だけ', 'でも', 'けど', 'だが', 'しか', 'ため', 'ところ', 'もの',
-  'あり', 'なり', 'ため', 'ほど', 'つつ', 'しも', 'にも', 'とも', 'への',
-  'での', 'とは', 'には', 'では', 'から', 'まで', 'より', 'にて',
+  'あり', 'なり', 'ほど', 'つつ', 'しも', 'にも', 'とも', 'への',
+  'での', 'とは', 'には', 'では', 'にて', 'まし', 'てい', 'てる',
+  'した', 'して', 'しな', 'しま', 'ので', 'のに', 'から', 'まで',
+  'より', 'など', 'まま', 'ほか', 'うち', 'ごと', 'について', 'において',
+  'という', 'といえば', 'みたい', 'らしい', 'ような', 'かな', 'かも',
+  'じゃ', 'っていう', 'って', 'かって', 'なって', 'してみた', 'してみる',
+  'やって', 'やってみ', 'みた', 'みて', 'みる',
+  'part', 'Part', 'PART', 'vol', 'Vol', 'VOL', 'ver', 'Ver', 'VER',
+  'new', 'New', 'NEW', 'the', 'The', 'THE', 'and', 'for', 'with',
 ]);
 
 /**
  * キーワード抽出
- * 上位50%の動画タイトルから単語を抽出してランキングを返す
+ * カタカナ・漢字・英語パターンで意味ある短いワードを抽出してスコアリング
  */
 export function extractKeywords(
   videos: VideoData[],
@@ -154,41 +161,68 @@ export function extractKeywords(
   // 再生数でソートして上位50%を使用
   const sorted = [...videos].sort((a, b) => b.viewCount - a.viewCount);
   const topHalf = sorted.slice(0, Math.ceil(sorted.length / 2));
+  const globalAvg = topHalf.reduce((s, v) => s + v.viewCount, 0) / topHalf.length || 1;
 
-  const wordCount: Map<string, number> = new Map();
+  // word → そのワードを含む動画の再生数リスト
+  const wordVideos: Map<string, number[]> = new Map();
 
   topHalf.forEach((video) => {
-    // タイトルから単語を抽出
-    const title = video.title
-      // 括弧とその中身を除去
+    const cleaned = video.title
       .replace(/【[^】]*】/g, ' ')
       .replace(/「[^」]*」/g, ' ')
       .replace(/\[[^\]]*\]/g, ' ')
       .replace(/\([^)]*\)/g, ' ')
-      // 記号・数字のみの文字列を除去
-      .replace(/[！？!?#＃@＠※・♪♫★☆◆◇▼▽►▶]/g, ' ')
-      // 数字のみトークンを除去
+      .replace(/[！？!?#＃@＠※・♪♫★☆◆◇▼▽►▶〜～]/g, ' ')
       .replace(/\d+/g, ' ');
 
-    // スペース・句読点で分割
-    const tokens = title.split(/[\s　、。，．\-_/／・]+/).filter((t) => t.length > 0);
+    const words: string[] = [];
 
-    tokens.forEach((token) => {
-      const word = token.trim();
-      // 2文字以上、ストップワードでない、数字のみでない
+    // カタカナ連続（2〜8文字）— 外来語・固有名詞
+    const katakana = cleaned.match(/[ァ-ヶーｦ-ﾟ]{2,8}/g) || [];
+    words.push(...katakana);
+
+    // 漢字連続（2〜6文字）— 熟語・名詞
+    const kanji = cleaned.match(/[一-龯々〆]{2,6}/g) || [];
+    words.push(...kanji);
+
+    // 英字単語（3〜8文字）— ブランド・技術用語
+    const english = cleaned.match(/[A-Za-z]{3,8}/g) || [];
+    words.push(...english);
+
+    // ひらがな+漢字 or 漢字+ひらがな の複合（2〜6文字）
+    const mixed = cleaned.match(/[ぁ-ん一-龯]{2,6}/g) || [];
+    words.push(...mixed);
+
+    // 同一動画内での重複除去
+    const seen = new Set<string>();
+    words.forEach((w) => {
+      const word = w.trim();
       if (
         word.length >= 2 &&
+        word.length <= 8 &&
         !STOP_WORDS.has(word) &&
         !/^\d+$/.test(word) &&
-        !/^[a-zA-Z]$/.test(word)
+        !seen.has(word)
       ) {
-        wordCount.set(word, (wordCount.get(word) || 0) + 1);
+        seen.add(word);
+        const existing = wordVideos.get(word) || [];
+        existing.push(video.viewCount);
+        wordVideos.set(word, existing);
       }
     });
   });
 
-  return Array.from(wordCount.entries())
-    .map(([word, count]) => ({ word, count }))
-    .sort((a, b) => b.count - a.count)
-    .slice(0, topN);
+  // スコア = 出現回数 × (そのワードを含む動画の平均再生数 / 全体平均)
+  // 2回以上出現したワードのみ対象
+  return Array.from(wordVideos.entries())
+    .filter(([, viewCounts]) => viewCounts.length >= 2)
+    .map(([word, viewCounts]) => {
+      const count = viewCounts.length;
+      const avgViews = viewCounts.reduce((s, v) => s + v, 0) / count;
+      const score = count * (avgViews / globalAvg);
+      return { word, count, score };
+    })
+    .sort((a, b) => b.score - a.score)
+    .slice(0, topN)
+    .map(({ word, count }) => ({ word, count }));
 }
