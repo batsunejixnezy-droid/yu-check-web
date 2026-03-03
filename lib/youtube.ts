@@ -317,6 +317,114 @@ export interface TrendingVideo {
   daysOld: number;
 }
 
+// ============================================================
+// 個別動画分析
+// ============================================================
+
+export interface VideoAnalysisData {
+  videoId: string;
+  title: string;
+  description: string;
+  channelId: string;
+  channelName: string;
+  publishedAt: string;
+  duration: number;
+  thumbnailUrl: string;
+  viewCount: number;
+  likeCount: number;
+  commentCount: number;
+  likeRate: number;
+  commentRate: number;
+  publishHour: number;
+  publishDayOfWeek: number;
+  channelAvgViews: number;
+  channelMedianViews: number;
+  channelVideoCount: number;
+  diffFromAvg: number;
+  channelRank: number;
+}
+
+export function extractVideoId(input: string): string | null {
+  const patterns = [
+    /(?:youtube\.com\/watch\?(?:[^&]+&)*v=|youtu\.be\/|youtube\.com\/embed\/|youtube\.com\/shorts\/)([A-Za-z0-9_-]{11})/,
+    /^([A-Za-z0-9_-]{11})$/,
+  ];
+  for (const p of patterns) {
+    const m = input.trim().match(p);
+    if (m) return m[1];
+  }
+  return null;
+}
+
+export async function fetchVideoAnalysis(urlOrId: string): Promise<VideoAnalysisData> {
+  const videoId = extractVideoId(urlOrId);
+  if (!videoId) throw new Error('有効なYouTube URLまたは動画IDを入力してください');
+
+  const videoUrl = `${YOUTUBE_API_BASE}/videos?part=snippet,statistics,contentDetails&id=${videoId}`;
+  const videoData = await fetchWithErrorHandling(videoUrl);
+
+  if (!videoData.items || videoData.items.length === 0) {
+    throw new Error('動画が見つかりません。URLを確認してください。');
+  }
+
+  const v = videoData.items[0];
+  const channelId = v.snippet.channelId;
+  const viewCount = parseInt(v.statistics.viewCount) || 0;
+  const likeCount = parseInt(v.statistics.likeCount || '0') || 0;
+  const commentCount = parseInt(v.statistics.commentCount || '0') || 0;
+  const duration = parseDuration(v.contentDetails.duration);
+  const publishedAt = v.snippet.publishedAt;
+
+  const jstDate = new Date(new Date(publishedAt).getTime() + 9 * 60 * 60 * 1000);
+  const publishHour = jstDate.getUTCHours();
+  const publishDayOfWeek = jstDate.getUTCDay();
+
+  const thumbnailUrl =
+    v.snippet.thumbnails?.maxres?.url ||
+    v.snippet.thumbnails?.high?.url ||
+    v.snippet.thumbnails?.medium?.url || '';
+
+  // 同チャンネルの直近30本で比較
+  const recentVideos = await fetchRecentVideos(channelId, 30);
+  const recentViewCounts = recentVideos.map((r) => r.viewCount).filter((c) => c > 0);
+
+  let channelAvgViews = 0;
+  let channelMedianViews = 0;
+  let diffFromAvg = 0;
+  let channelRank = 0;
+
+  if (recentViewCounts.length > 0) {
+    channelAvgViews = Math.round(recentViewCounts.reduce((s, c) => s + c, 0) / recentViewCounts.length);
+    const sorted = [...recentViewCounts].sort((a, b) => b - a);
+    channelMedianViews = sorted[Math.floor(sorted.length / 2)];
+    diffFromAvg = channelAvgViews > 0 ? ((viewCount - channelAvgViews) / channelAvgViews) * 100 : 0;
+    channelRank = sorted.findIndex((c) => viewCount >= c) + 1;
+  }
+
+  return {
+    videoId,
+    title: v.snippet.title,
+    description: v.snippet.description || '',
+    channelId,
+    channelName: v.snippet.channelTitle,
+    publishedAt,
+    duration,
+    thumbnailUrl,
+    viewCount,
+    likeCount,
+    commentCount,
+    likeRate: viewCount > 0 ? likeCount / viewCount : 0,
+    commentRate: viewCount > 0 ? commentCount / viewCount : 0,
+    publishHour,
+    publishDayOfWeek,
+    channelAvgViews,
+    channelMedianViews,
+    channelVideoCount: recentVideos.length,
+    diffFromAvg,
+    channelRank,
+  };
+}
+
 export type TrendSearchRange = '1week' | '2weeks' | '1month' | '3months';
 
 export function trendRangeToISO(range: TrendSearchRange): string {
@@ -332,6 +440,7 @@ export function trendRangeToISO(range: TrendSearchRange): string {
 export async function searchTrendingVideos(
   query: string,
   dateRange: TrendSearchRange = '1month',
+  language: 'ja' | 'en' | 'all' = 'ja',
   maxResults: number = 100
 ): Promise<TrendingVideo[]> {
   const publishedAfter = trendRangeToISO(dateRange);
@@ -342,6 +451,7 @@ export async function searchTrendingVideos(
   while (remaining > 0) {
     const batchSize = Math.min(remaining, 50);
     let searchUrl = `${YOUTUBE_API_BASE}/search?part=snippet&q=${encodeURIComponent(query)}&type=video&publishedAfter=${encodeURIComponent(publishedAfter)}&maxResults=${batchSize}&order=viewCount`;
+    if (language !== 'all') searchUrl += `&relevanceLanguage=${language}`;
     if (pageToken) searchUrl += `&pageToken=${pageToken}`;
 
     const data = await fetchWithErrorHandling(searchUrl);

@@ -52,9 +52,17 @@ export default function PostingTimeTab({ results }: PostingTimeTabProps) {
 
   // 時間帯の投稿数を集計
   const hourPostCount = new Array(24).fill(0);
+  const dayPostCount = new Array(7).fill(0);
   selectedVideos.forEach((v) => {
     hourPostCount[v.publishHour]++;
+    dayPostCount[v.publishDayOfWeek]++;
   });
+
+  // 信頼度：3本以上あれば参考になる
+  const MIN_RELIABLE = 3;
+  const bestHourCount = hourPostCount[bestHour];
+  const bestDayCount = dayPostCount[bestDay];
+  const isReliable = bestHourCount >= MIN_RELIABLE && bestDayCount >= MIN_RELIABLE && selectedVideos.length >= 10;
 
   return (
     <div className="space-y-6">
@@ -79,16 +87,32 @@ export default function PostingTimeTab({ results }: PostingTimeTabProps) {
       </div>
 
       {/* 推奨投稿時間 */}
-      <div className="bg-red-50 border border-red-100 rounded-lg p-4">
-        <p className="text-sm font-medium text-red-800">
-          推奨投稿時間
-        </p>
-        <p className="text-lg font-bold text-red-600 mt-1">
-          {DAY_NAMES[bestDay]}曜日の{bestHour}時ごろ
-        </p>
-        <p className="text-xs text-red-700 mt-1">
-          平均再生数: {formatNumber(byDay[bestDay])}回 / この時間帯の投稿: {hourPostCount[bestHour]}本
-        </p>
+      <div className={`border rounded-lg p-4 ${isReliable ? 'bg-red-50 border-red-100' : 'bg-gray-50 border-gray-200'}`}>
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className={`text-sm font-medium ${isReliable ? 'text-red-800' : 'text-gray-600'}`}>
+              ライバルの主要投稿時間帯
+            </p>
+            <p className={`text-lg font-bold mt-1 ${isReliable ? 'text-red-600' : 'text-gray-500'}`}>
+              {DAY_NAMES[bestDay]}曜日の{bestHour}時ごろ
+            </p>
+            <p className="text-xs text-gray-500 mt-1">
+              この時間帯の投稿: {hourPostCount[bestHour]}本 / 平均再生数: {formatNumber(byHour[bestHour])}回
+            </p>
+          </div>
+          <div className={`flex-shrink-0 px-2.5 py-1 rounded-full text-xs font-medium ${
+            isReliable
+              ? 'bg-green-100 text-green-700'
+              : 'bg-yellow-100 text-yellow-700'
+          }`}>
+            {isReliable ? '信頼度: 高' : `信頼度: 低 (データ${selectedVideos.length}本)`}
+          </div>
+        </div>
+        {!isReliable && (
+          <p className="text-xs text-gray-500 mt-2 border-t border-gray-200 pt-2">
+            サンプル数が少ないため参考程度に。より正確な分析には各時間帯3本以上・合計10本以上のデータが必要です。
+          </p>
+        )}
       </div>
 
       {/* 時間帯別ヒートマップ */}
@@ -99,8 +123,10 @@ export default function PostingTimeTab({ results }: PostingTimeTabProps) {
         <div className="space-y-1">
           {Array.from({ length: 24 }, (_, hour) => {
             const views = byHour[hour];
+            const count = hourPostCount[hour];
             const barWidth = maxHourViews > 0 ? (views / maxHourViews) * 100 : 0;
             const isBest = hour === bestHour;
+            const isLowData = count > 0 && count < MIN_RELIABLE;
 
             return (
               <div key={hour} className="flex items-center gap-2">
@@ -110,7 +136,7 @@ export default function PostingTimeTab({ results }: PostingTimeTabProps) {
                 <div className="flex-1 bg-gray-100 rounded h-5 relative overflow-hidden">
                   <div
                     className={`h-full rounded transition-all ${
-                      isBest ? 'bg-red-500' : 'bg-blue-200'
+                      isBest ? 'bg-red-500' : isLowData ? 'bg-gray-300' : 'bg-blue-200'
                     }`}
                     style={{ width: `${barWidth}%` }}
                   />
@@ -118,14 +144,19 @@ export default function PostingTimeTab({ results }: PostingTimeTabProps) {
                 <span className="text-xs text-gray-500 w-16 text-right flex-shrink-0">
                   {views > 0 ? formatNumber(views) : '-'}
                 </span>
-                <span className="text-xs text-gray-400 w-10 text-right flex-shrink-0">
-                  {hourPostCount[hour] > 0 ? `${hourPostCount[hour]}本` : ''}
+                <span className={`text-xs w-12 text-right flex-shrink-0 ${
+                  count === 0 ? 'text-gray-200' : isLowData ? 'text-yellow-500' : 'text-gray-400'
+                }`}>
+                  {count > 0 ? `${count}本` : ''}
+                  {isLowData && ' ⚠'}
                 </span>
               </div>
             );
           })}
         </div>
-        <p className="text-xs text-gray-400 mt-2">赤いバー = 最も再生される時間帯</p>
+        <p className="text-xs text-gray-400 mt-2">
+          赤いバー = 最も再生される時間帯 / ⚠ = サンプル数が少なく参考程度
+        </p>
       </div>
 
       {/* 曜日別棒グラフ */}
@@ -137,6 +168,8 @@ export default function PostingTimeTab({ results }: PostingTimeTabProps) {
           {byDay.map((views, day) => {
             const barHeight = maxDayViews > 0 ? (views / maxDayViews) * 100 : 0;
             const isBest = day === bestDay;
+            const count = dayPostCount[day];
+            const isLowData = count > 0 && count < MIN_RELIABLE;
 
             return (
               <div key={day} className="flex-1 flex flex-col items-center gap-1">
@@ -146,7 +179,7 @@ export default function PostingTimeTab({ results }: PostingTimeTabProps) {
                 <div className="w-full flex items-end" style={{ height: '80px' }}>
                   <div
                     className={`w-full rounded-t transition-all ${
-                      isBest ? 'bg-red-500' : 'bg-blue-200'
+                      isBest ? 'bg-red-500' : isLowData ? 'bg-gray-300' : 'bg-blue-200'
                     }`}
                     style={{ height: `${barHeight}%` }}
                   />
@@ -158,11 +191,14 @@ export default function PostingTimeTab({ results }: PostingTimeTabProps) {
                 >
                   {DAY_NAMES[day]}
                 </span>
+                <span className={`text-xs ${isLowData ? 'text-yellow-500' : 'text-gray-300'}`}>
+                  {count > 0 ? `${count}本` : ''}
+                </span>
               </div>
             );
           })}
         </div>
-        <p className="text-xs text-gray-400 mt-2">赤いバー = 最も再生される曜日</p>
+        <p className="text-xs text-gray-400 mt-2">赤いバー = 最も再生される曜日 / グレー = サンプル数が少ない曜日</p>
       </div>
     </div>
   );

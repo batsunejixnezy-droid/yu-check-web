@@ -6,6 +6,8 @@ import { TrendingVideo, TrendSearchRange, searchTrendingVideos, formatNumber, fo
 
 type SortMode = 'velocity' | 'views' | 'newest' | 'oldest';
 type MaxViewsFilter = 'all' | '100k' | '500k' | '1m';
+type VideoTypeFilter = 'all' | 'long' | 'short';
+type LanguageFilter = 'ja' | 'en' | 'all';
 
 const RANGE_OPTIONS: { value: TrendSearchRange; label: string; desc: string }[] = [
   { value: '1week', label: '1週間', desc: '超直近トレンド' },
@@ -54,13 +56,19 @@ function VelocityBar({ vpd, maxVpd }: { vpd: number; maxVpd: number }) {
   );
 }
 
-const EXAMPLE_QUERIES = ['一人旅 国内', '筋トレ 初心者', '料理 時短', 'ASMR 睡眠', 'vlog 日常', '英語 勉強法'];
+const EXAMPLE_QUERIES_JA = ['一人旅 国内', '筋トレ 初心者', '料理 時短', 'ASMR 睡眠', 'vlog 日常', '英語 勉強法'];
+const EXAMPLE_QUERIES_EN = ['solo travel', 'workout beginner', 'easy cooking', 'ASMR sleep', 'daily vlog', 'study with me'];
+
+// YouTube Shorts の閾値 (秒)
+const SHORTS_THRESHOLD = 60;
 
 export default function TrendingSearchTab() {
   const [query, setQuery] = useState('');
   const [dateRange, setDateRange] = useState<TrendSearchRange>('1month');
   const [sortMode, setSortMode] = useState<SortMode>('velocity');
   const [maxViewsFilter, setMaxViewsFilter] = useState<MaxViewsFilter>('all');
+  const [videoTypeFilter, setVideoTypeFilter] = useState<VideoTypeFilter>('all');
+  const [language, setLanguage] = useState<LanguageFilter>('ja');
   const [isLoading, setIsLoading] = useState(false);
   const [videos, setVideos] = useState<TrendingVideo[]>([]);
   const [searchedQuery, setSearchedQuery] = useState('');
@@ -68,7 +76,7 @@ export default function TrendingSearchTab() {
   const [error, setError] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const handleSearch = async (q?: string) => {
+  const handleSearch = async (q?: string, lang?: LanguageFilter) => {
     const searchQuery = (q ?? query).trim();
     if (!searchQuery) return;
 
@@ -77,7 +85,8 @@ export default function TrendingSearchTab() {
     setVideos([]);
 
     try {
-      const results = await searchTrendingVideos(searchQuery, dateRange, 100);
+      const useLang = lang ?? language;
+      const results = await searchTrendingVideos(searchQuery, dateRange, useLang, 100);
       setVideos(results);
       setSearchedQuery(searchQuery);
       setSearchedRange(dateRange);
@@ -89,7 +98,13 @@ export default function TrendingSearchTab() {
   };
 
   const maxFilter = MAX_VIEWS_OPTIONS.find((o) => o.value === maxViewsFilter)?.max ?? Infinity;
-  const filtered = videos.filter((v) => v.viewCount <= maxFilter);
+  const filtered = videos
+    .filter((v) => v.viewCount <= maxFilter)
+    .filter((v) => {
+      if (videoTypeFilter === 'short') return v.duration <= SHORTS_THRESHOLD;
+      if (videoTypeFilter === 'long') return v.duration > SHORTS_THRESHOLD;
+      return true;
+    });
 
   const sorted = [...filtered].sort((a, b) => {
     switch (sortMode) {
@@ -146,7 +161,7 @@ export default function TrendingSearchTab() {
         {/* 例キーワード */}
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-xs text-gray-400">例:</span>
-          {EXAMPLE_QUERIES.map((q) => (
+          {(language === 'en' ? EXAMPLE_QUERIES_EN : EXAMPLE_QUERIES_JA).map((q) => (
             <button
               key={q}
               onClick={() => {
@@ -161,7 +176,55 @@ export default function TrendingSearchTab() {
         </div>
 
         {/* オプション */}
-        <div className="flex items-center gap-6 flex-wrap pt-1 border-t border-gray-100">
+        <div className="flex flex-wrap gap-x-6 gap-y-3 pt-1 border-t border-gray-100">
+          {/* 言語 */}
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-medium text-gray-500 whitespace-nowrap">言語:</span>
+            <div className="flex gap-1">
+              {([
+                { value: 'ja', label: '日本語' },
+                { value: 'en', label: '海外(英語)' },
+                { value: 'all', label: 'すべて' },
+              ] as { value: LanguageFilter; label: string }[]).map((opt) => (
+                <button
+                  key={opt.value}
+                  onClick={() => setLanguage(opt.value)}
+                  className={`px-3 py-1 text-xs rounded-full border font-medium transition-all ${
+                    language === opt.value
+                      ? 'bg-blue-600 text-white border-blue-600'
+                      : 'bg-white text-gray-600 border-gray-300 hover:border-blue-400'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* 動画タイプ */}
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-medium text-gray-500 whitespace-nowrap">タイプ:</span>
+            <div className="flex gap-1">
+              {([
+                { value: 'all', label: 'すべて' },
+                { value: 'long', label: 'ロング' },
+                { value: 'short', label: 'ショート' },
+              ] as { value: VideoTypeFilter; label: string }[]).map((opt) => (
+                <button
+                  key={opt.value}
+                  onClick={() => setVideoTypeFilter(opt.value)}
+                  className={`px-3 py-1 text-xs rounded-full border font-medium transition-all ${
+                    videoTypeFilter === opt.value
+                      ? 'bg-purple-600 text-white border-purple-600'
+                      : 'bg-white text-gray-600 border-gray-300 hover:border-purple-400'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
           {/* 期間 */}
           <div className="flex items-center gap-2">
             <span className="text-xs font-medium text-gray-500 whitespace-nowrap">投稿期間:</span>
@@ -234,8 +297,18 @@ export default function TrendingSearchTab() {
               </span>
               <span className="text-sm text-gray-500 ml-2">
                 直近{rangeLabel} / {sorted.length}件
+                {videoTypeFilter !== 'all' && (
+                  <span className="ml-1 px-1.5 py-0.5 bg-purple-100 text-purple-700 rounded text-xs">
+                    {videoTypeFilter === 'short' ? 'ショートのみ' : 'ロングのみ'}
+                  </span>
+                )}
+                {language !== 'all' && (
+                  <span className="ml-1 px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded text-xs">
+                    {language === 'ja' ? '日本語' : '海外(英語)'}
+                  </span>
+                )}
                 {maxViewsFilter !== 'all' && (
-                  <span className="ml-1 text-orange-600">（再生数フィルター中）</span>
+                  <span className="ml-1 text-orange-600 text-xs">再生数絞り込み中</span>
                 )}
               </span>
             </div>

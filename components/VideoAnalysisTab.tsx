@@ -1,358 +1,325 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Image from 'next/image';
-import { ChannelResult, VideoWithMetrics } from '@/types';
-import { formatNumber, formatDuration } from '@/lib/youtube';
+import { VideoAnalysisData, fetchVideoAnalysis, formatNumber, formatDuration } from '@/lib/youtube';
 
 interface VideoAnalysisTabProps {
-  results: ChannelResult[];
+  initialVideoId?: string | null;
 }
-
-type SortKey = 'rank' | 'publishedAt' | 'diffFromAverage' | 'likeRate' | 'commentRate' | 'duration';
-type SortDir = 'asc' | 'desc';
 
 const DAY_LABELS = ['日', '月', '火', '水', '木', '金', '土'];
 
 function formatDate(dateStr: string): string {
   const d = new Date(dateStr);
-  const jst = new Date(d.getTime() + 9 * 60 * 60 * 1000);
-  const y = jst.getUTCFullYear();
-  const m = String(jst.getUTCMonth() + 1).padStart(2, '0');
-  const day = String(jst.getUTCDate()).padStart(2, '0');
-  const dow = DAY_LABELS[jst.getUTCDay()];
-  return `${y}/${m}/${day} (${dow})`;
+  return `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')} (${DAY_LABELS[d.getDay()]})`;
 }
 
-function SortIcon({ active, dir }: { active: boolean; dir: SortDir }) {
-  if (!active) return <span className="text-gray-300 ml-0.5 text-xs">↕</span>;
-  return <span className="text-red-500 ml-0.5 text-xs">{dir === 'asc' ? '↑' : '↓'}</span>;
-}
-
-function StatsBadge({ label, value, color }: { label: string; value: string; color: string }) {
+function StatRow({ label, value, sub }: { label: string; value: string; sub?: string }) {
   return (
-    <div className="flex flex-col items-center px-4 py-2 bg-gray-50 rounded-lg">
-      <span className={`text-base font-bold ${color}`}>{value}</span>
-      <span className="text-xs text-gray-400 mt-0.5">{label}</span>
+    <div className="flex items-center justify-between py-2.5 border-b border-gray-100 last:border-0">
+      <span className="text-sm text-gray-500">{label}</span>
+      <div className="text-right">
+        <span className="text-sm font-semibold text-gray-900">{value}</span>
+        {sub && <span className="text-xs text-gray-400 ml-1.5">{sub}</span>}
+      </div>
     </div>
   );
 }
 
-export default function VideoAnalysisTab({ results }: VideoAnalysisTabProps) {
-  const [selectedChannelIndex, setSelectedChannelIndex] = useState(0);
-  const [videoType, setVideoType] = useState<'long' | 'short'>('long');
-  const [sortKey, setSortKey] = useState<SortKey>('rank');
-  const [sortDir, setSortDir] = useState<SortDir>('asc');
+function TitleBadge({ ok, label }: { ok: boolean; label: string }) {
+  return (
+    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${
+      ok ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'
+    }`}>
+      {ok ? '✓' : '–'} {label}
+    </span>
+  );
+}
 
-  const validResults = results.filter((r) => !r.error && (r.longVideos.length > 0 || r.shortVideos.length > 0));
+function analyzeTitleStructure(title: string) {
+  const len = title.length;
+  const hasBrackets = /【|】|「|」/.test(title);
+  const hasNumbers = /[0-9０-９]/.test(title);
+  const hasQuestion = /[?？]/.test(title);
+  const hasEllipsis = /…|\.{3}|。。。/.test(title);
+  const hasExclamation = /[!！]/.test(title);
+  const hasYearMonth = /[年月]|20\d\d/.test(title);
 
-  if (results.length === 0) {
-    return (
-      <div className="text-center py-20 text-gray-400">
-        <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
-          <svg className="w-8 h-8 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 10l4.553-2.069A1 1 0 0121 8.867v6.266a1 1 0 01-1.447.902L15 14M3 8a2 2 0 012-2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V8z" />
-          </svg>
-        </div>
-        <p className="text-sm font-medium">先に「分析を実行」してください</p>
-      </div>
-    );
-  }
+  const lenGrade =
+    len <= 20 ? { label: `${len}文字 (短め)`, ok: false } :
+    len <= 50 ? { label: `${len}文字 (最適)`, ok: true } :
+    { label: `${len}文字 (長め)`, ok: false };
 
-  if (validResults.length === 0) {
-    return <p className="text-sm text-gray-400 py-8 text-center">分析結果がありません</p>;
-  }
+  return { len, lenGrade, hasBrackets, hasNumbers, hasQuestion, hasEllipsis, hasExclamation, hasYearMonth };
+}
 
-  const safeIndex = Math.min(selectedChannelIndex, validResults.length - 1);
-  const currentResult = validResults[safeIndex];
-  const videos: VideoWithMetrics[] = videoType === 'long' ? currentResult.longVideos : currentResult.shortVideos;
+export default function VideoAnalysisTab({ initialVideoId }: VideoAnalysisTabProps) {
+  const [input, setInput] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [data, setData] = useState<VideoAnalysisData | null>(null);
+  const [error, setError] = useState('');
 
-  const maxViews = videos.length > 0 ? Math.max(...videos.map((v) => v.viewCount)) : 1;
-  const avgViews = videos.length > 0 ? videos.reduce((s, v) => s + v.viewCount, 0) / videos.length : 0;
-  const minViews = videos.length > 0 ? Math.min(...videos.map((v) => v.viewCount)) : 0;
-  const viralCount = videos.filter((v) => v.isViral).length;
-  const avgLikeRate =
-    videos.filter((v) => v.viewCount > 0).length > 0
-      ? videos.filter((v) => v.viewCount > 0).reduce((s, v) => s + v.likeCount / v.viewCount, 0) /
-        videos.filter((v) => v.viewCount > 0).length
-      : 0;
+  // 分析タブから動画IDが渡されたとき自動で分析する
+  useEffect(() => {
+    if (initialVideoId) {
+      const url = `https://www.youtube.com/watch?v=${initialVideoId}`;
+      setInput(url);
+      runAnalysis(url);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialVideoId]);
 
-  const handleSort = (key: SortKey) => {
-    if (sortKey === key) {
-      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
-    } else {
-      setSortKey(key);
-      // デフォルト方向: rankとpublishedAtはasc(古い順→新しい順は後で)、残りはdesc
-      setSortDir(key === 'rank' ? 'asc' : 'desc');
+  const runAnalysis = async (urlOverride?: string) => {
+    const target = (urlOverride ?? input).trim();
+    if (!target) return;
+
+    setIsLoading(true);
+    setError('');
+    setData(null);
+
+    try {
+      const result = await fetchVideoAnalysis(target);
+      setData(result);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '分析中にエラーが発生しました');
+    } finally {
+      setIsLoading(false);
     }
   };
 
-  const sortedVideos = [...videos].sort((a, b) => {
-    let aVal = 0, bVal = 0;
-    switch (sortKey) {
-      case 'rank':
-        aVal = a.rank; bVal = b.rank; break;
-      case 'publishedAt':
-        aVal = new Date(a.publishedAt).getTime(); bVal = new Date(b.publishedAt).getTime(); break;
-      case 'diffFromAverage':
-        aVal = a.diffFromAverage; bVal = b.diffFromAverage; break;
-      case 'likeRate':
-        aVal = a.viewCount > 0 ? a.likeCount / a.viewCount : 0;
-        bVal = b.viewCount > 0 ? b.likeCount / b.viewCount : 0; break;
-      case 'commentRate':
-        aVal = a.viewCount > 0 ? a.commentCount / a.viewCount : 0;
-        bVal = b.viewCount > 0 ? b.commentCount / b.viewCount : 0; break;
-      case 'duration':
-        aVal = a.duration; bVal = b.duration; break;
-    }
-    return sortDir === 'asc' ? aVal - bVal : bVal - aVal;
-  });
+  const diffColor = data
+    ? data.diffFromAvg >= 20 ? 'text-green-600' : data.diffFromAvg <= -20 ? 'text-red-500' : 'text-gray-600'
+    : '';
 
-  const SortTh = ({
-    col,
-    label,
-    align = 'right',
-    className = '',
-  }: {
-    col: SortKey;
-    label: string;
-    align?: 'left' | 'right';
-    className?: string;
-  }) => (
-    <th className={`py-2.5 px-3 font-medium ${align === 'right' ? 'text-right' : 'text-left'} ${className}`}>
-      <button
-        onClick={() => handleSort(col)}
-        className="hover:text-gray-800 transition-colors inline-flex items-center gap-0.5"
-      >
-        {label}
-        <SortIcon active={sortKey === col} dir={sortDir} />
-      </button>
-    </th>
-  );
+  const titleAnalysis = data ? analyzeTitleStructure(data.title) : null;
 
   return (
-    <div className="space-y-4">
-      {/* チャンネルタブ */}
-      <div className="overflow-x-auto -mx-1">
-        <div className="flex gap-0.5 min-w-max border-b border-gray-200 px-1">
-          {validResults.map((result, index) => (
-            <button
-              key={result.channelId}
-              onClick={() => setSelectedChannelIndex(index)}
-              className={`px-4 py-2.5 text-sm rounded-t-lg border-b-2 transition-all whitespace-nowrap ${
-                safeIndex === index
-                  ? 'border-red-600 text-red-600 font-semibold bg-red-50'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50'
-              }`}
-            >
-              {result.channelName}
-            </button>
-          ))}
-        </div>
+    <div className="space-y-5">
+      {/* 入力エリア */}
+      <div className="flex gap-2">
+        <input
+          type="text"
+          value={input}
+          onChange={(e) => { setInput(e.target.value); setError(''); }}
+          onKeyDown={(e) => e.key === 'Enter' && !isLoading && runAnalysis()}
+          placeholder="YouTubeの動画URL または 動画ID を貼り付け..."
+          className="flex-1 px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent"
+          disabled={isLoading}
+        />
+        <button
+          onClick={() => runAnalysis()}
+          disabled={isLoading || !input.trim()}
+          className="px-5 py-2.5 bg-blue-600 text-white text-sm font-bold rounded-lg hover:bg-blue-700 disabled:opacity-40 transition-colors whitespace-nowrap shadow-sm"
+        >
+          {isLoading ? '取得中...' : '分析'}
+        </button>
       </div>
 
-      {/* コントロール行 */}
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        {/* ロング / ショート切り替え */}
-        <div className="flex gap-1 p-1 bg-gray-100 rounded-lg">
-          <button
-            onClick={() => setVideoType('long')}
-            className={`px-3 py-1.5 text-sm rounded-md transition-all ${
-              videoType === 'long'
-                ? 'bg-white text-blue-700 font-semibold shadow-sm'
-                : 'text-gray-500 hover:text-gray-700'
-            }`}
-          >
-            ロング動画 {currentResult.longVideos.length}本
-          </button>
-          <button
-            onClick={() => setVideoType('short')}
-            className={`px-3 py-1.5 text-sm rounded-md transition-all ${
-              videoType === 'short'
-                ? 'bg-white text-purple-700 font-semibold shadow-sm'
-                : 'text-gray-500 hover:text-gray-700'
-            }`}
-          >
-            ショート動画 {currentResult.shortVideos.length}本
-          </button>
-        </div>
+      {/* エラー */}
+      {error && (
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-sm text-red-700">{error}</div>
+      )}
 
-        {/* 統計サマリー */}
-        {videos.length > 0 && (
-          <div className="flex gap-2">
-            <StatsBadge label="平均再生数" value={formatNumber(Math.round(avgViews))} color="text-gray-900" />
-            <StatsBadge label="最高" value={formatNumber(maxViews)} color="text-green-600" />
-            <StatsBadge label="最低" value={formatNumber(minViews)} color="text-red-500" />
-            {viralCount > 0 && (
-              <StatsBadge label="急上昇" value={`${viralCount}本`} color="text-orange-500" />
-            )}
-            <StatsBadge label="平均いいね率" value={`${(avgLikeRate * 100).toFixed(2)}%`} color="text-blue-600" />
+      {/* ローディング */}
+      {isLoading && (
+        <div className="text-center py-16">
+          <div className="inline-flex flex-col items-center gap-3">
+            <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+            <p className="text-sm text-gray-500">動画情報とチャンネル平均を取得中...</p>
           </div>
-        )}
-      </div>
-
-      {/* テーブル */}
-      {videos.length === 0 ? (
-        <div className="text-center py-12 text-gray-400">
-          <p className="text-sm">該当する動画がありません</p>
         </div>
-      ) : (
-        <div className="overflow-x-auto rounded-lg border border-gray-200">
-          <table className="w-full text-sm">
-            <thead className="bg-gray-50">
-              <tr className="border-b border-gray-200 text-xs text-gray-500">
-                <SortTh col="rank" label="#" align="left" className="pl-4 w-10" />
-                <th className="text-left py-2.5 px-3 font-medium min-w-[300px]">動画</th>
-                <th className="text-right py-2.5 px-3 font-medium">再生数</th>
-                <th className="text-left py-2.5 px-3 font-medium min-w-[130px]">パフォーマンス</th>
-                <SortTh col="diffFromAverage" label="平均比" />
-                <SortTh col="likeRate" label="いいね率" />
-                <SortTh col="commentRate" label="コメ率" />
-                <SortTh col="publishedAt" label="投稿日" />
-                <SortTh col="duration" label="長さ" />
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100 bg-white">
-              {sortedVideos.map((video) => {
-                const barPct = maxViews > 0 ? (video.viewCount / maxViews) * 100 : 0;
-                const likeRate = video.viewCount > 0 ? (video.likeCount / video.viewCount) * 100 : 0;
-                const commentRate = video.viewCount > 0 ? (video.commentCount / video.viewCount) * 100 : 0;
-                const viewDiff = video.viewCount - video.averageViews;
-                const isPositive = viewDiff >= 0;
-                const diffColor =
-                  video.diffFromAverage > 20
-                    ? 'text-green-600'
-                    : video.diffFromAverage < -20
-                    ? 'text-red-500'
-                    : 'text-gray-500';
-                const barColor =
-                  barPct >= 75
-                    ? 'bg-green-500'
-                    : barPct >= 45
-                    ? 'bg-blue-400'
-                    : barPct >= 20
-                    ? 'bg-yellow-400'
-                    : 'bg-gray-300';
-                const rankBg =
-                  video.rank <= 3
-                    ? 'bg-green-100 text-green-800'
-                    : video.rank >= videos.length - 1
-                    ? 'bg-red-100 text-red-700'
-                    : 'bg-gray-100 text-gray-600';
+      )}
 
-                return (
-                  <tr key={video.videoId} className="hover:bg-gray-50 transition-colors">
-                    {/* # */}
-                    <td className="py-3 pl-4 pr-2">
-                      <div className="flex items-center gap-1">
-                        <span
-                          className={`inline-flex items-center justify-center w-6 h-6 rounded-full text-xs font-bold ${rankBg}`}
-                        >
-                          {video.rank}
-                        </span>
-                        {video.isViral && (
-                          <span className="text-sm" title="急上昇">🔥</span>
-                        )}
+      {/* 空状態 */}
+      {!isLoading && !data && !error && (
+        <div className="text-center py-20 text-gray-400">
+          <div className="text-5xl mb-4">🎬</div>
+          <p className="text-sm font-medium text-gray-500">URLを貼り付けて分析する</p>
+          <p className="text-xs mt-2 text-gray-400">
+            分析タブの動画一覧から「詳細」ボタンでも開けます
+          </p>
+        </div>
+      )}
+
+      {/* 分析結果 */}
+      {data && !isLoading && (
+        <div className="space-y-4">
+          {/* 動画ヘッダー */}
+          <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+            <div className="flex gap-4 p-5">
+              {/* サムネイル */}
+              <div className="flex-shrink-0">
+                <a
+                  href={`https://www.youtube.com/watch?v=${data.videoId}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  <Image
+                    src={data.thumbnailUrl}
+                    alt={data.title}
+                    width={240}
+                    height={135}
+                    className="rounded-lg object-cover hover:opacity-90 transition-opacity"
+                    unoptimized
+                  />
+                </a>
+              </div>
+
+              {/* タイトルと基本情報 */}
+              <div className="flex-1 min-w-0 space-y-2">
+                <a
+                  href={`https://www.youtube.com/watch?v=${data.videoId}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="block text-base font-bold text-gray-900 hover:text-blue-600 transition-colors leading-snug"
+                >
+                  {data.title}
+                </a>
+                <a
+                  href={`https://www.youtube.com/channel/${data.channelId}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-sm text-gray-500 hover:text-blue-500 block"
+                >
+                  {data.channelName}
+                </a>
+                <p className="text-xs text-gray-400">
+                  {formatDate(data.publishedAt)} {String(data.publishHour).padStart(2, '0')}:00 投稿 (JST)
+                </p>
+
+                {/* メトリクスバッジ */}
+                <div className="flex gap-2 flex-wrap pt-1">
+                  <span className="px-2.5 py-1 bg-gray-900 text-white text-xs font-bold rounded-full">
+                    {formatNumber(data.viewCount)} 回再生
+                  </span>
+                  <span className="px-2.5 py-1 bg-blue-100 text-blue-700 text-xs font-medium rounded-full">
+                    👍 {formatNumber(data.likeCount)} ({(data.likeRate * 100).toFixed(2)}%)
+                  </span>
+                  <span className="px-2.5 py-1 bg-gray-100 text-gray-600 text-xs font-medium rounded-full">
+                    💬 {formatNumber(data.commentCount)}
+                  </span>
+                  <span className="px-2.5 py-1 bg-gray-100 text-gray-600 text-xs font-medium rounded-full">
+                    ⏱ {formatDuration(data.duration)}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* チャンネル平均比 — チャンネルデータがある場合のみ */}
+            {data.channelAvgViews > 0 && (
+              <div className="border-t border-gray-100 px-5 py-4 bg-gray-50">
+                <div className="flex items-center justify-between gap-4 flex-wrap">
+                  <div className="flex gap-6">
+                    <div className="text-center">
+                      <p className="text-xs text-gray-400 mb-0.5">この動画</p>
+                      <p className="text-lg font-bold text-gray-900">{formatNumber(data.viewCount)}</p>
+                    </div>
+                    <div className="text-center">
+                      <p className="text-xs text-gray-400 mb-0.5">CH平均 (直近{data.channelVideoCount}本)</p>
+                      <p className="text-lg font-bold text-gray-500">{formatNumber(data.channelAvgViews)}</p>
+                    </div>
+                    <div className="text-center">
+                      <p className="text-xs text-gray-400 mb-0.5">平均比</p>
+                      <p className={`text-lg font-bold ${diffColor}`}>
+                        {data.diffFromAvg >= 0 ? '+' : ''}{data.diffFromAvg.toFixed(0)}%
+                      </p>
+                    </div>
+                    {data.channelRank > 0 && (
+                      <div className="text-center">
+                        <p className="text-xs text-gray-400 mb-0.5">CH内順位</p>
+                        <p className="text-lg font-bold text-gray-900">
+                          {data.channelRank}位 / {data.channelVideoCount}本
+                        </p>
                       </div>
-                    </td>
+                    )}
+                  </div>
 
-                    {/* 動画 */}
-                    <td className="py-3 px-3">
-                      <div className="flex items-start gap-3">
-                        <a
-                          href={`https://www.youtube.com/watch?v=${video.videoId}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="flex-shrink-0"
-                        >
-                          <Image
-                            src={video.thumbnailUrl}
-                            alt={video.title}
-                            width={96}
-                            height={54}
-                            className="rounded-md object-cover hover:opacity-80 transition-opacity"
-                            unoptimized
-                          />
-                        </a>
-                        <div className="min-w-0 flex-1">
-                          <a
-                            href={`https://www.youtube.com/watch?v=${video.videoId}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-sm font-medium text-gray-900 hover:text-red-600 transition-colors line-clamp-2 leading-snug"
-                          >
-                            {video.title}
-                          </a>
-                          <div className="flex items-center gap-2 mt-1.5">
-                            <span className="text-xs text-gray-400">
-                              👍 {formatNumber(video.likeCount)}
-                            </span>
-                            <span className="text-xs text-gray-400">
-                              💬 {formatNumber(video.commentCount)}
-                            </span>
-                          </div>
-                        </div>
+                  {/* パフォーマンスバー */}
+                  <div className="flex-1 min-w-[200px]">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-gray-400 whitespace-nowrap">チャンネル内</span>
+                      <div className="flex-1 bg-gray-200 rounded-full h-3">
+                        <div
+                          className={`h-3 rounded-full transition-all ${
+                            data.diffFromAvg >= 50 ? 'bg-green-500' :
+                            data.diffFromAvg >= 0 ? 'bg-blue-400' :
+                            data.diffFromAvg >= -30 ? 'bg-yellow-400' : 'bg-red-400'
+                          }`}
+                          style={{
+                            width: `${Math.max(5, Math.min(100,
+                              data.channelVideoCount > 0
+                                ? ((data.channelVideoCount - data.channelRank + 1) / data.channelVideoCount) * 100
+                                : 50
+                            ))}%`
+                          }}
+                        />
                       </div>
-                    </td>
+                      <span className="text-xs text-gray-400 whitespace-nowrap">上位</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
 
-                    {/* 再生数 */}
-                    <td className="py-3 px-3 text-right font-bold text-gray-900 tabular-nums whitespace-nowrap">
-                      {formatNumber(video.viewCount)}
-                      <span className="block text-xs font-normal text-gray-400">
-                        {video.viewCount.toLocaleString('ja-JP')}
-                      </span>
-                    </td>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* 詳細スタッツ */}
+            <div className="bg-white border border-gray-200 rounded-xl p-5">
+              <h3 className="text-sm font-bold text-gray-900 mb-3">詳細指標</h3>
+              <div>
+                <StatRow
+                  label="再生数 (正確な値)"
+                  value={data.viewCount.toLocaleString('ja-JP')}
+                />
+                <StatRow
+                  label="高評価率"
+                  value={`${(data.likeRate * 100).toFixed(2)}%`}
+                  sub={`${data.likeCount.toLocaleString('ja-JP')} いいね`}
+                />
+                <StatRow
+                  label="コメント率"
+                  value={`${(data.commentRate * 100).toFixed(3)}%`}
+                  sub={`${data.commentCount.toLocaleString('ja-JP')} コメント`}
+                />
+                <StatRow
+                  label="動画時間"
+                  value={formatDuration(data.duration)}
+                  sub={`${data.duration}秒`}
+                />
+                <StatRow
+                  label="投稿曜日"
+                  value={`${DAY_LABELS[data.publishDayOfWeek]}曜日`}
+                />
+                <StatRow
+                  label="投稿時間 (JST)"
+                  value={`${String(data.publishHour).padStart(2, '0')}:00 〜 ${String(data.publishHour + 1).padStart(2, '0')}:00`}
+                />
+              </div>
+            </div>
 
-                    {/* パフォーマンスバー */}
-                    <td className="py-3 px-3">
-                      <div className="flex items-center gap-2">
-                        <div className="flex-1 bg-gray-100 rounded-full h-2.5 min-w-[80px]">
-                          <div
-                            className={`h-2.5 rounded-full transition-all ${barColor}`}
-                            style={{ width: `${barPct}%` }}
-                          />
-                        </div>
-                        <span className="text-xs text-gray-400 w-9 text-right tabular-nums">
-                          {Math.round(barPct)}%
-                        </span>
-                      </div>
-                    </td>
-
-                    {/* 平均比 */}
-                    <td className="py-3 px-3 text-right">
-                      <span className={`text-sm font-semibold ${diffColor} tabular-nums`}>
-                        {isPositive ? '+' : ''}
-                        {formatNumber(Math.abs(viewDiff))}
-                      </span>
-                      <span className={`block text-xs tabular-nums ${diffColor}`}>
-                        ({isPositive ? '+' : ''}{video.diffFromAverage.toFixed(0)}%)
-                      </span>
-                    </td>
-
-                    {/* いいね率 */}
-                    <td className="py-3 px-3 text-right text-gray-700 tabular-nums text-sm">
-                      {likeRate.toFixed(2)}%
-                    </td>
-
-                    {/* コメ率 */}
-                    <td className="py-3 px-3 text-right text-gray-500 tabular-nums text-sm">
-                      {commentRate.toFixed(3)}%
-                    </td>
-
-                    {/* 投稿日 */}
-                    <td className="py-3 px-3 text-right text-gray-500 text-xs whitespace-nowrap">
-                      {formatDate(video.publishedAt)}
-                    </td>
-
-                    {/* 長さ */}
-                    <td className="py-3 px-3 text-right text-gray-500 tabular-nums text-sm whitespace-nowrap">
-                      {formatDuration(video.duration)}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+            {/* タイトル分析 */}
+            {titleAnalysis && (
+              <div className="bg-white border border-gray-200 rounded-xl p-5">
+                <h3 className="text-sm font-bold text-gray-900 mb-3">タイトル分析</h3>
+                <div className="bg-gray-50 rounded-lg p-3 mb-3">
+                  <p className="text-sm text-gray-700 leading-relaxed break-all">{data.title}</p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <TitleBadge ok={titleAnalysis.lenGrade.ok} label={titleAnalysis.lenGrade.label} />
+                  <TitleBadge ok={titleAnalysis.hasBrackets} label="【】括弧あり" />
+                  <TitleBadge ok={titleAnalysis.hasNumbers} label="数字あり" />
+                  <TitleBadge ok={titleAnalysis.hasQuestion} label="疑問形" />
+                  <TitleBadge ok={titleAnalysis.hasEllipsis} label="省略(…)" />
+                  <TitleBadge ok={titleAnalysis.hasExclamation} label="感嘆符(!)" />
+                  <TitleBadge ok={titleAnalysis.hasYearMonth} label="年月含む" />
+                </div>
+                <p className="text-xs text-gray-400 mt-3">
+                  ✓ = このタイトルに含まれる要素 / – = 含まれない要素
+                </p>
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>

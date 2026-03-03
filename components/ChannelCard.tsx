@@ -17,9 +17,10 @@ interface ChannelCardProps {
   result: ChannelResult;
   displayLimit?: number;
   dateRange?: DateRange;
+  onAnalyzeVideo?: (videoId: string) => void;
 }
 
-export default function ChannelCard({ result, displayLimit, dateRange }: ChannelCardProps) {
+export default function ChannelCard({ result, displayLimit, dateRange, onAnalyzeVideo }: ChannelCardProps) {
   const [activeTab, setActiveTab] = useState<'long' | 'short'>('long');
 
   if (result.error) {
@@ -148,10 +149,10 @@ export default function ChannelCard({ result, displayLimit, dateRange }: Channel
       {/* テーブル */}
       <div className="px-5 py-4">
         {activeTab === 'long' && (
-          <VideoTable videos={result.longVideos} videoType="long" limit={displayLimit} />
+          <VideoTable videos={result.longVideos} videoType="long" limit={displayLimit} onAnalyzeVideo={onAnalyzeVideo} />
         )}
         {activeTab === 'short' && (
-          <VideoTable videos={result.shortVideos} videoType="short" limit={displayLimit} />
+          <VideoTable videos={result.shortVideos} videoType="short" limit={displayLimit} onAnalyzeVideo={onAnalyzeVideo} />
         )}
       </div>
     </div>

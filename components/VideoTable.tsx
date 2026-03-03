@@ -8,6 +8,7 @@ interface VideoTableProps {
   videos: VideoWithMetrics[];
   videoType: 'long' | 'short';
   limit?: number;
+  onAnalyzeVideo?: (videoId: string) => void;
 }
 
 function getRankBadgeClass(rank: number): string {
@@ -27,7 +28,7 @@ function formatDate(dateStr: string): string {
   return `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}`;
 }
 
-export default function VideoTable({ videos, videoType, limit }: VideoTableProps) {
+export default function VideoTable({ videos, videoType, limit, onAnalyzeVideo }: VideoTableProps) {
   const displayedVideos = limit ? videos.slice(0, limit) : videos;
   if (videos.length === 0) {
     return (
@@ -45,7 +46,8 @@ export default function VideoTable({ videos, videoType, limit }: VideoTableProps
             <th className="text-right py-2 pr-4 font-medium">再生回数</th>
             <th className="text-right py-2 pr-4 font-medium">平均比</th>
             <th className="text-right py-2 pr-4 font-medium">投稿日</th>
-            <th className="text-right py-2 font-medium">長さ</th>
+            <th className="text-right py-2 pr-4 font-medium">長さ</th>
+            {onAnalyzeVideo && <th className="text-right py-2 font-medium w-12"></th>}
           </tr>
         </thead>
         <tbody className="divide-y divide-gray-100">
@@ -107,9 +109,19 @@ export default function VideoTable({ videos, videoType, limit }: VideoTableProps
               <td className="py-3 pr-4 text-right text-gray-500">
                 {formatDate(video.publishedAt)}
               </td>
-              <td className="py-3 text-right text-gray-500">
+              <td className="py-3 pr-4 text-right text-gray-500">
                 {formatDuration(video.duration)}
               </td>
+              {onAnalyzeVideo && (
+                <td className="py-3 text-right">
+                  <button
+                    onClick={() => onAnalyzeVideo(video.videoId)}
+                    className="text-xs px-2 py-1 text-blue-500 hover:text-white hover:bg-blue-500 border border-blue-200 hover:border-blue-500 rounded transition-all"
+                  >
+                    詳細
+                  </button>
+                </td>
+              )}
             </tr>
             );
           })}

@@ -48,10 +48,16 @@ export default function Home() {
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
   const [selectedChannelIndex, setSelectedChannelIndex] = useState(0);
   const [displayLimit, setDisplayLimit] = useState<DisplayLimit>(30);
+  const [analyzeVideoId, setAnalyzeVideoId] = useState<string | null>(null);
 
   useEffect(() => {
     setSettings(loadSettings());
   }, []);
+
+  const handleAnalyzeVideo = (videoId: string) => {
+    setAnalyzeVideoId(videoId);
+    setActiveTab('videoAnalysis');
+  };
 
   const handleDateRangeChange = (range: DateRange) => {
     const next = { ...settings, dateRange: range };
@@ -291,6 +297,7 @@ export default function Home() {
                     result={results[selectedChannelIndex]}
                     displayLimit={displayLimit}
                     dateRange={settings.dateRange}
+                    onAnalyzeVideo={handleAnalyzeVideo}
                   />
                 )}
               </div>
@@ -300,7 +307,7 @@ export default function Home() {
 
         {activeTab === 'videoAnalysis' && (
           <div className="bg-white border border-gray-200 rounded-xl p-5">
-            <VideoAnalysisTab results={results} />
+            <VideoAnalysisTab initialVideoId={analyzeVideoId} />
           </div>
         )}
 
