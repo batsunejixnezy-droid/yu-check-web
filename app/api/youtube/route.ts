@@ -1,13 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 const YOUTUBE_API_BASE = 'https://www.googleapis.com/youtube/v3';
-const API_KEY = process.env.YOUTUBE_API_KEY;
+const SERVER_API_KEY = process.env.YOUTUBE_API_KEY;
 
 export async function GET(request: NextRequest) {
-  if (!API_KEY) {
-    return NextResponse.json({ error: 'サーバー設定エラー' }, { status: 500 });
-  }
-
   const { searchParams } = new URL(request.url);
   const endpoint = searchParams.get('endpoint');
 
@@ -15,10 +11,19 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'endpointが必要です' }, { status: 400 });
   }
 
+  // ユーザー提供のキーを優先、なければサーバー環境変数を使用
+  const userKey = searchParams.get('userKey');
+  const activeKey = userKey || SERVER_API_KEY;
+
+  if (!activeKey) {
+    return NextResponse.json({ error: 'APIキーが設定されていません' }, { status: 500 });
+  }
+
   // APIキーを付けてYouTubeにリクエスト
   const params = new URLSearchParams(searchParams);
   params.delete('endpoint');
-  params.set('key', API_KEY);
+  params.delete('userKey'); // ユーザーキーはYouTubeに送らない
+  params.set('key', activeKey);
 
   const youtubeUrl = `${YOUTUBE_API_BASE}/${endpoint}?${params.toString()}`;
 

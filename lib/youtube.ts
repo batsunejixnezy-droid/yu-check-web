@@ -1,5 +1,7 @@
 import { VideoData, VideoWithMetrics, ChannelResult, DateRange } from '@/types';
 import { calculateChannelScore, analyzePostingTimes } from '@/lib/analysis';
+import { cacheGet, cacheSet, TTL } from '@/lib/cache';
+import { getActiveApiKey, markKeyExhausted, getNextApiKey } from '@/lib/apiKeyManager';
 
 const YOUTUBE_API_BASE = '/api/youtube';
 const SHORT_VIDEO_THRESHOLD = 180; // 3分 = 180秒
@@ -43,28 +45,77 @@ export function dateRangeToISO(range: DateRange): string | undefined {
   return new Date(Date.now() - days * 86400000).toISOString();
 }
 
+/**
+ * キーローテーション付きフェッチ
+ * ユーザーAPIキーが登録されている場合はそれを優先し、
+ * クォータ切れ時は次のキーに自動切り替え
+ */
+async function fetchWithKeyRotation(apiUrl: string, userKey: string | null): Promise<Response> {
+  const params = new URLSearchParams(apiUrl.split('?')[1]);
+  if (userKey) params.set('userKey', userKey);
+  const fullUrl = `${apiUrl.split('?')[0]}?${params.toString()}`;
+  return fetch(fullUrl);
+}
+
 async function fetchWithErrorHandling(url: string) {
   // /api/youtube?endpoint=xxx&... の形式に変換
   const urlObj = new URL(url, 'http://localhost');
   const endpoint = urlObj.pathname.replace('/api/youtube/', '');
   const params = new URLSearchParams(urlObj.search);
   params.set('endpoint', endpoint);
-  const apiUrl = `${YOUTUBE_API_BASE}?${params.toString()}`;
+  const baseApiUrl = `${YOUTUBE_API_BASE}?${params.toString()}`;
 
-  const response = await fetch(apiUrl);
-  const data = await response.json();
+  // キャッシュチェック（GETリクエストのみ）
+  const cacheKey = baseApiUrl;
+  const cached = cacheGet<unknown>(cacheKey);
+  if (cached !== null) return cached;
 
-  if (!response.ok) {
-    const errorReason = data?.error?.errors?.[0]?.reason;
-    if (errorReason === 'quotaExceeded') {
-      throw new Error('YouTube APIのクォータ制限に達しました。明日再試行してください。');
-    } else if (errorReason === 'keyInvalid') {
-      throw new Error('APIキーが無効です。正しいAPIキーを設定してください。');
+  // アクティブなAPIキーを取得（ない場合は null → サーバー側の env キーを使用）
+  let userKey = getActiveApiKey();
+  let attempts = 0;
+  const maxAttempts = 5; // 最大キー試行数
+
+  while (attempts < maxAttempts) {
+    attempts++;
+    const response = await fetchWithKeyRotation(baseApiUrl, userKey);
+    const data = await response.json();
+
+    if (!response.ok) {
+      const errorReason = data?.error?.errors?.[0]?.reason;
+
+      if (errorReason === 'quotaExceeded') {
+        if (userKey) {
+          // このキーを枯渇済みとしてマーク
+          markKeyExhausted(userKey);
+          // 次のキーを試す
+          const nextKey = getNextApiKey(userKey);
+          if (nextKey) {
+            userKey = nextKey;
+            continue;
+          }
+        }
+        throw new Error('YouTube APIのクォータ制限に達しました。設定でAPIキーを追加するか、明日再試行してください。');
+      } else if (errorReason === 'keyInvalid') {
+        if (userKey) {
+          markKeyExhausted(userKey);
+          const nextKey = getNextApiKey(userKey);
+          if (nextKey) { userKey = nextKey; continue; }
+        }
+        throw new Error('APIキーが無効です。設定でAPIキーを確認してください。');
+      }
+      throw new Error(`API呼び出しエラー: ${data?.error?.message || response.statusText}`);
     }
-    throw new Error(`API呼び出しエラー: ${data?.error?.message || response.statusText}`);
+
+    // 成功 → キャッシュ保存
+    const ttl = endpoint.startsWith('search') ? TTL.TRENDING_SEARCH
+      : endpoint.startsWith('channels') ? TTL.CHANNEL_DATA
+      : TTL.CHANNEL_ANALYSIS;
+    cacheSet(cacheKey, data, ttl);
+
+    return data;
   }
 
-  return data;
+  throw new Error('利用可能なAPIキーがありません。設定でAPIキーを追加してください。');
 }
 
 export async function fetchChannelData(
