@@ -42,184 +42,222 @@ function formatShortDate(dateStr: string): string {
   return `${d.getMonth() + 1}/${d.getDate()}`;
 }
 
+// Catmull-Rom → Cubic Bezier でなめらかな曲線を生成
+function smoothCurvePath(pts: { x: number; y: number }[]): string {
+  if (pts.length < 2) return '';
+  let d = `M ${pts[0].x.toFixed(1)} ${pts[0].y.toFixed(1)}`;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const p0 = pts[Math.max(0, i - 1)];
+    const p1 = pts[i];
+    const p2 = pts[i + 1];
+    const p3 = pts[Math.min(pts.length - 1, i + 2)];
+    const cp1x = p1.x + (p2.x - p0.x) / 5;
+    const cp1y = p1.y + (p2.y - p0.y) / 5;
+    const cp2x = p2.x - (p3.x - p1.x) / 5;
+    const cp2y = p2.y - (p3.y - p1.y) / 5;
+    d += ` C ${cp1x.toFixed(1)} ${cp1y.toFixed(1)}, ${cp2x.toFixed(1)} ${cp2y.toFixed(1)}, ${p2.x.toFixed(1)} ${p2.y.toFixed(1)}`;
+  }
+  return d;
+}
+
 function ChannelTrendChart({ videos, avgViews }: { videos: RecentVideoPoint[]; avgViews: number }) {
   const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
   if (videos.length === 0) return null;
 
   const display = videos.slice(-20);
-  const W = 600;
-  const H = 160;
-  const PAD = { top: 16, right: 16, bottom: 28, left: 52 };
+  const W = 640;
+  const H = 220;
+  const PAD = { top: 20, right: 20, bottom: 36, left: 58 };
   const innerW = W - PAD.left - PAD.right;
   const innerH = H - PAD.top - PAD.bottom;
 
   const maxViews = Math.max(...display.map((v) => v.viewCount), 1);
-  const minViews = Math.min(...display.map((v) => v.viewCount), 0);
+  // 最小値は0かデータの最小値の少し下
+  const dataMin = Math.min(...display.map((v) => v.viewCount));
+  const minViews = Math.max(0, dataMin - (maxViews - dataMin) * 0.15);
   const range = maxViews - minViews || 1;
 
   const xOf = (i: number) => PAD.left + (i / (display.length - 1 || 1)) * innerW;
   const yOf = (v: number) => PAD.top + innerH - ((v - minViews) / range) * innerH;
 
-  // 折れ線のパス
-  const linePath = display
-    .map((v, i) => `${i === 0 ? 'M' : 'L'}${xOf(i).toFixed(1)},${yOf(v.viewCount).toFixed(1)}`)
-    .join(' ');
+  const pts = display.map((v, i) => ({ x: xOf(i), y: yOf(v.viewCount) }));
+  const linePath = smoothCurvePath(pts);
 
-  // グラデーション塗りつぶし
+  // エリアのクローズパス
   const areaPath = `${linePath} L${xOf(display.length - 1).toFixed(1)},${(PAD.top + innerH).toFixed(1)} L${PAD.left.toFixed(1)},${(PAD.top + innerH).toFixed(1)} Z`;
 
-  // Y軸ラベル（3本）
-  const yLabels = [maxViews, (maxViews + minViews) / 2, minViews];
+  // Y軸ラベル（4本）
+  const yTicks = Array.from({ length: 4 }, (_, i) => minViews + (range / 3) * (3 - i));
 
-  // 平均ラインのY座標
-  const avgY = yOf(Math.min(avgViews, maxViews));
+  // 平均ライン
+  const avgY = yOf(Math.max(minViews, Math.min(avgViews, maxViews)));
+  const showAvg = avgViews > 0 && avgY >= PAD.top && avgY <= PAD.top + innerH;
 
+  // ホバー情報
   const hovered = hoveredIdx !== null ? display[hoveredIdx] : null;
-  const tooltipX = hoveredIdx !== null ? xOf(hoveredIdx) : 0;
-  const tooltipY = hoveredIdx !== null ? yOf(display[hoveredIdx].viewCount) : 0;
-  const tooltipLeft = tooltipX > W * 0.65;
+  const hovX = hoveredIdx !== null ? xOf(hoveredIdx) : 0;
+  const hovY = hoveredIdx !== null ? yOf(display[hoveredIdx].viewCount) : 0;
+  const tooltipOnLeft = hovX > W * 0.6;
+
+  // diffFromAvg の色
+  const diffColor = (v: RecentVideoPoint) => {
+    if (avgViews === 0) return '#6b7280';
+    const d = (v.viewCount - avgViews) / avgViews * 100;
+    return d >= 20 ? '#16a34a' : d <= -20 ? '#dc2626' : '#6b7280';
+  };
 
   return (
-    <div className="bg-white border border-gray-200 rounded-xl p-5">
-      <h3 className="text-sm font-bold text-gray-900 mb-1">チャンネル 再生数推移 (直近{display.length}本)</h3>
-      <p className="text-xs text-gray-400 mb-3">古い順 → 新しい順 / 青点: 分析動画</p>
+    <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+      {/* ヘッダー */}
+      <div className="px-5 pt-5 pb-3 border-b border-gray-100">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-sm font-bold text-gray-900">チャンネル 再生数推移</h3>
+            <p className="text-xs text-gray-400 mt-0.5">直近{display.length}本 / 古い順 → 新しい順</p>
+          </div>
+          {avgViews > 0 && (
+            <div className="text-right">
+              <p className="text-xs text-gray-400">チャンネル平均</p>
+              <p className="text-sm font-bold text-amber-600">{formatNumber(avgViews)}回</p>
+            </div>
+          )}
+        </div>
+      </div>
 
-      <div className="relative w-full overflow-x-auto">
+      {/* チャート */}
+      <div className="relative px-2 py-3">
         <svg
           viewBox={`0 0 ${W} ${H}`}
           className="w-full"
-          style={{ minWidth: '280px', height: '160px' }}
+          style={{ height: '220px' }}
         >
           <defs>
-            <linearGradient id="trendGrad" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="#3b82f6" stopOpacity="0.18" />
-              <stop offset="100%" stopColor="#3b82f6" stopOpacity="0.01" />
+            <linearGradient id="ytGrad" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#2563eb" stopOpacity="0.22" />
+              <stop offset="75%" stopColor="#2563eb" stopOpacity="0.04" />
+              <stop offset="100%" stopColor="#2563eb" stopOpacity="0" />
             </linearGradient>
+            <clipPath id="chartClip">
+              <rect x={PAD.left} y={PAD.top} width={innerW} height={innerH} />
+            </clipPath>
           </defs>
 
-          {/* Y軸グリッド & ラベル */}
-          {yLabels.map((val, i) => {
+          {/* Y軸グリッド */}
+          {yTicks.map((val, i) => {
             const y = yOf(val);
             return (
               <g key={i}>
-                <line
-                  x1={PAD.left} y1={y} x2={PAD.left + innerW} y2={y}
-                  stroke="#e5e7eb" strokeWidth="1" strokeDasharray={i === 0 ? '0' : '3,3'}
-                />
-                <text
-                  x={PAD.left - 6} y={y + 4}
-                  fontSize="10" fill="#9ca3af" textAnchor="end"
-                >
-                  {formatNumber(val)}
+                <line x1={PAD.left} y1={y} x2={PAD.left + innerW} y2={y}
+                  stroke="#f3f4f6" strokeWidth={i === 0 ? 1.5 : 1} />
+                <text x={PAD.left - 8} y={y + 4} fontSize="10" fill="#9ca3af" textAnchor="end">
+                  {formatNumber(Math.round(val))}
                 </text>
               </g>
             );
           })}
+
+          {/* X軸ベースライン */}
+          <line x1={PAD.left} y1={PAD.top + innerH} x2={PAD.left + innerW} y2={PAD.top + innerH}
+            stroke="#e5e7eb" strokeWidth="1" />
 
           {/* 平均ライン */}
-          {avgViews > 0 && avgY >= PAD.top && avgY <= PAD.top + innerH && (
-            <line
-              x1={PAD.left} y1={avgY} x2={PAD.left + innerW} y2={avgY}
-              stroke="#f59e0b" strokeWidth="1.5" strokeDasharray="5,3"
-            />
+          {showAvg && (
+            <g>
+              <line x1={PAD.left} y1={avgY} x2={PAD.left + innerW} y2={avgY}
+                stroke="#f59e0b" strokeWidth="1.5" strokeDasharray="6,4" opacity="0.8" />
+              <text x={PAD.left + innerW + 4} y={avgY + 4} fontSize="9" fill="#f59e0b">avg</text>
+            </g>
           )}
 
-          {/* エリア塗りつぶし */}
-          <path d={areaPath} fill="url(#trendGrad)" />
-
-          {/* 折れ線 */}
-          <path d={linePath} fill="none" stroke="#3b82f6" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
-
-          {/* ホバー領域 & 点 */}
-          {display.map((v, i) => {
-            const cx = xOf(i);
-            const cy = yOf(v.viewCount);
-            const isHovered = hoveredIdx === i;
-            return (
-              <g key={v.videoId}>
-                {/* ホバー用の広い透明領域 */}
-                <rect
-                  x={cx - (innerW / display.length / 2)}
-                  y={PAD.top}
-                  width={innerW / display.length}
-                  height={innerH}
-                  fill="transparent"
-                  onMouseEnter={() => setHoveredIdx(i)}
-                  onMouseLeave={() => setHoveredIdx(null)}
-                  style={{ cursor: 'crosshair' }}
-                />
-                {/* ドット */}
-                {(v.isTarget || isHovered) && (
-                  <circle
-                    cx={cx} cy={cy}
-                    r={v.isTarget ? 5 : 3.5}
-                    fill={v.isTarget ? '#3b82f6' : '#93c5fd'}
-                    stroke="white" strokeWidth="2"
-                    style={{ pointerEvents: 'none' }}
-                  />
-                )}
-              </g>
-            );
-          })}
-
-          {/* X軸日付（間引き表示） */}
-          {display.map((v, i) => {
-            if (display.length <= 10 || i % Math.ceil(display.length / 8) === 0 || i === display.length - 1) {
-              return (
-                <text
-                  key={i}
-                  x={xOf(i)} y={H - 4}
-                  fontSize="9" fill={v.isTarget ? '#3b82f6' : '#9ca3af'}
-                  textAnchor="middle"
-                  fontWeight={v.isTarget ? 'bold' : 'normal'}
-                >
-                  {formatShortDate(v.publishedAt)}
-                </text>
-              );
-            }
-            return null;
-          })}
+          {/* エリア & ライン（クリップ適用） */}
+          <g clipPath="url(#chartClip)">
+            <path d={areaPath} fill="url(#ytGrad)" />
+            <path d={linePath} fill="none" stroke="#2563eb" strokeWidth="2.5"
+              strokeLinejoin="round" strokeLinecap="round" />
+          </g>
 
           {/* ホバー縦線 */}
           {hoveredIdx !== null && (
-            <line
-              x1={tooltipX} y1={PAD.top} x2={tooltipX} y2={PAD.top + innerH}
-              stroke="#d1d5db" strokeWidth="1" strokeDasharray="3,2"
-              style={{ pointerEvents: 'none' }}
-            />
+            <line x1={hovX} y1={PAD.top} x2={hovX} y2={PAD.top + innerH}
+              stroke="#cbd5e1" strokeWidth="1" strokeDasharray="4,3"
+              style={{ pointerEvents: 'none' }} />
           )}
+
+          {/* ドット（分析対象 & ホバー） */}
+          {display.map((v, i) => {
+            const cx = xOf(i);
+            const cy = yOf(v.viewCount);
+            const isHov = hoveredIdx === i;
+            if (!v.isTarget && !isHov) return null;
+            return (
+              <g key={v.videoId} style={{ pointerEvents: 'none' }}>
+                {v.isTarget && (
+                  <circle cx={cx} cy={cy} r={8} fill="#2563eb" opacity="0.15" />
+                )}
+                <circle cx={cx} cy={cy}
+                  r={v.isTarget ? 5.5 : 4}
+                  fill={v.isTarget ? '#2563eb' : '#60a5fa'}
+                  stroke="white" strokeWidth="2.5" />
+              </g>
+            );
+          })}
+
+          {/* ホバー用透明領域 */}
+          {display.map((v, i) => (
+            <rect key={v.videoId}
+              x={i === 0 ? PAD.left : (xOf(i - 1) + xOf(i)) / 2}
+              y={PAD.top}
+              width={i === 0
+                ? (xOf(0) + xOf(1)) / 2 - PAD.left
+                : i === display.length - 1
+                  ? PAD.left + innerW - (xOf(i - 1) + xOf(i)) / 2
+                  : (xOf(i + 1) - xOf(i - 1)) / 2}
+              height={innerH}
+              fill="transparent"
+              style={{ cursor: 'crosshair' }}
+              onMouseEnter={() => setHoveredIdx(i)}
+              onMouseLeave={() => setHoveredIdx(null)}
+            />
+          ))}
+
+          {/* X軸日付ラベル */}
+          {display.map((v, i) => {
+            const step = Math.ceil(display.length / 7);
+            if (i % step !== 0 && i !== display.length - 1) return null;
+            return (
+              <text key={i} x={xOf(i)} y={H - 6}
+                fontSize="10" fill={v.isTarget ? '#2563eb' : '#9ca3af'}
+                textAnchor="middle" fontWeight={v.isTarget ? '700' : '400'}>
+                {formatShortDate(v.publishedAt)}
+              </text>
+            );
+          })}
         </svg>
 
-        {/* ホバーツールチップ（SVG外でHTMLとして表示） */}
+        {/* ホバーツールチップ */}
         {hovered && (
           <div
-            className="absolute top-2 pointer-events-none z-10"
-            style={{ [tooltipLeft ? 'right' : 'left']: `${tooltipLeft ? W - tooltipX + 8 : tooltipX + 8}px`, transform: 'none' }}
+            className="absolute top-4 pointer-events-none z-20"
+            style={tooltipOnLeft
+              ? { right: `${W - hovX + 12}px` }
+              : { left: `${hovX + 12}px` }}
           >
-            <div className="bg-gray-900 text-white text-xs rounded-lg px-3 py-2 shadow-lg whitespace-nowrap max-w-[220px]">
-              <p className="truncate max-w-[200px] text-gray-300 mb-0.5">{hovered.title}</p>
-              <p className="font-bold text-sm">{formatNumber(hovered.viewCount)}回</p>
-              <p className="text-gray-400">{formatShortDate(hovered.publishedAt)}</p>
-              {hovered.isTarget && <p className="text-blue-300 font-medium mt-0.5">← 分析対象</p>}
+            <div className="bg-gray-950 text-white rounded-xl shadow-xl px-4 py-3 min-w-[160px]">
+              <p className="text-xs text-gray-400 mb-1 truncate max-w-[180px]">{hovered.title}</p>
+              <p className="text-xl font-bold leading-none">{formatNumber(hovered.viewCount)}<span className="text-sm font-normal ml-1">回</span></p>
+              {avgViews > 0 && (
+                <p className="text-xs mt-1" style={{ color: diffColor(hovered) }}>
+                  {hovered.viewCount >= avgViews ? '+' : ''}
+                  {(((hovered.viewCount - avgViews) / avgViews) * 100).toFixed(0)}% vs 平均
+                </p>
+              )}
+              <p className="text-xs text-gray-500 mt-1">{formatShortDate(hovered.publishedAt)}</p>
+              {hovered.isTarget && (
+                <div className="mt-1.5 px-2 py-0.5 bg-blue-600 rounded-full text-xs text-center font-medium">
+                  分析対象
+                </div>
+              )}
             </div>
-          </div>
-        )}
-      </div>
-
-      {/* 凡例 */}
-      <div className="flex items-center gap-4 mt-2 pt-3 border-t border-gray-100">
-        <div className="flex items-center gap-1.5">
-          <div className="w-8 h-0.5 bg-blue-500" />
-          <span className="text-xs text-gray-500">再生数推移</span>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <div className="w-5 h-5 rounded-full bg-blue-500 border-2 border-white shadow-sm flex-shrink-0" style={{ width: '10px', height: '10px' }} />
-          <span className="text-xs text-gray-500">分析対象動画</span>
-        </div>
-        {avgViews > 0 && (
-          <div className="flex items-center gap-1.5">
-            <div className="w-8 h-0 border-t-2 border-dashed border-amber-400" />
-            <span className="text-xs text-gray-500">平均 {formatNumber(avgViews)}回</span>
           </div>
         )}
       </div>
