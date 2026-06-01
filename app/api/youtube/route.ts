@@ -17,8 +17,10 @@ const SERVER_API_KEYS = [
   process.env.YOUTUBE_API_KEY_10,
 ].filter(Boolean) as string[];
 
-function isQuotaExceeded(data: { error?: { errors?: { reason?: string }[] } }): boolean {
-  return data?.error?.errors?.some((e) => e.reason === 'quotaExceeded') ?? false;
+// クォータ切れ／レート制限を広く判定（search は 429 rateLimitExceeded で返ることがある）
+function isQuotaOrRateError(data: { error?: { errors?: { reason?: string }[] } }): boolean {
+  const rotateReasons = ['quotaExceeded', 'rateLimitExceeded', 'dailyLimitExceeded', 'userRateLimitExceeded'];
+  return data?.error?.errors?.some((e) => rotateReasons.includes(e.reason ?? '')) ?? false;
 }
 
 // --- インメモリキャッシュ ---
@@ -124,7 +126,8 @@ export async function GET(request: NextRequest) {
         return res;
       }
 
-      if (response.status === 403 && isQuotaExceeded(data)) {
+      // 403(quota) / 429(rate) どちらでも、quota・rate系なら次のキー/プロジェクトへ
+      if ((response.status === 403 || response.status === 429) && isQuotaOrRateError(data)) {
         continue;
       }
 
