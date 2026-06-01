@@ -67,9 +67,11 @@ export function clearExpiredCache(): void {
 }
 
 // TTL定数
+// 発掘・チャンネル系は変化が遅いので24h（同じ/似たキーワードの再検索を1日中タダにしてクォータ節約）。
+// 動画分析だけは再生数の鮮度を残すため12h。
 export const TTL = {
-  CHANNEL_ANALYSIS: 4 * 60 * 60 * 1000,   // 4時間
-  TRENDING_SEARCH:  3 * 60 * 60 * 1000,   // 3時間
-  VIDEO_ANALYSIS:   4 * 60 * 60 * 1000,   // 4時間
-  CHANNEL_DATA:     6 * 60 * 60 * 1000,   // 6時間
+  CHANNEL_ANALYSIS: 24 * 60 * 60 * 1000,  // 24時間（旧4h）
+  TRENDING_SEARCH:  24 * 60 * 60 * 1000,  // 24時間（旧3h）穴場探しの再検索をタダ化
+  VIDEO_ANALYSIS:   12 * 60 * 60 * 1000,  // 12時間（旧4h）数字の鮮度を一部残す
+  CHANNEL_DATA:     24 * 60 * 60 * 1000,  // 24時間（旧6h）
 } as const;

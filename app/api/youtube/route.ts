@@ -3,8 +3,6 @@ import { NextRequest, NextResponse } from 'next/server';
 const YOUTUBE_API_BASE = 'https://www.googleapis.com/youtube/v3';
 
 // 複数のサーバーAPIキー（環境変数で管理）
-// YOUTUBE_API_KEYS にカンマ区切りで複数登録可能
-// 旧来の YOUTUBE_API_KEY / _2〜_10 との後方互換も維持
 const SERVER_API_KEYS = [
   ...(process.env.YOUTUBE_API_KEYS?.split(',').map((k) => k.trim()).filter(Boolean) ?? []),
   process.env.YOUTUBE_API_KEY,
@@ -23,9 +21,68 @@ function isQuotaExceeded(data: { error?: { errors?: { reason?: string }[] } }): 
   return data?.error?.errors?.some((e) => e.reason === 'quotaExceeded') ?? false;
 }
 
+// --- インメモリキャッシュ ---
+interface CacheEntry {
+  data: unknown;
+  timestamp: number;
+}
+
+const cache = new Map<string, CacheEntry>();
+const CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6時間キャッシュ（旧30分）。ウォームなインスタンスでの再消費を抑制
+const MAX_CACHE_SIZE = 500;
+
+function getCacheKey(endpoint: string, params: URLSearchParams): string {
+  const sorted = new URLSearchParams([...params.entries()].sort());
+  sorted.delete('key');
+  sorted.delete('userKey');
+  return `${endpoint}?${sorted.toString()}`;
+}
+
+function getFromCache(key: string): unknown | null {
+  const entry = cache.get(key);
+  if (!entry) return null;
+  if (Date.now() - entry.timestamp > CACHE_TTL_MS) {
+    cache.delete(key);
+    return null;
+  }
+  return entry.data;
+}
+
+function setCache(key: string, data: unknown): void {
+  // キャッシュサイズ上限管理
+  if (cache.size >= MAX_CACHE_SIZE) {
+    const oldest = cache.keys().next().value;
+    if (oldest) cache.delete(oldest);
+  }
+  cache.set(key, { data, timestamp: Date.now() });
+}
+
+// --- API残量トラッキング ---
+let dailyApiCalls = 0;
+let lastResetDate = new Date().toDateString();
+
+function trackApiCall(): void {
+  const today = new Date().toDateString();
+  if (today !== lastResetDate) {
+    dailyApiCalls = 0;
+    lastResetDate = today;
+  }
+  dailyApiCalls++;
+}
+
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const endpoint = searchParams.get('endpoint');
+
+  // API使用状況エンドポイント
+  if (endpoint === '_status') {
+    return NextResponse.json({
+      cacheSize: cache.size,
+      dailyApiCalls,
+      keyCount: SERVER_API_KEYS.length,
+      cacheTtlMinutes: CACHE_TTL_MS / 60000,
+    });
+  }
 
   if (!endpoint) {
     return NextResponse.json({ error: 'endpointが必要です' }, { status: 400 });
@@ -33,10 +90,19 @@ export async function GET(request: NextRequest) {
 
   const params = new URLSearchParams(searchParams);
   params.delete('endpoint');
-  params.delete('userKey'); // 旧互換: ユーザーキーパラメータは無視
+  params.delete('userKey');
 
   if (SERVER_API_KEYS.length === 0) {
     return NextResponse.json({ error: 'APIキーが設定されていません' }, { status: 500 });
+  }
+
+  // キャッシュチェック
+  const cacheKey = getCacheKey(endpoint, params);
+  const cached = getFromCache(cacheKey);
+  if (cached) {
+    const res = NextResponse.json(cached);
+    res.headers.set('X-Cache', 'HIT');
+    return res;
   }
 
   // サーバーキーを順番に試してクォータ切れなら次へ
@@ -51,18 +117,19 @@ export async function GET(request: NextRequest) {
       lastData = data;
 
       if (response.ok) {
-        return NextResponse.json(data);
+        trackApiCall();
+        setCache(cacheKey, data);
+        const res = NextResponse.json(data);
+        res.headers.set('X-Cache', 'MISS');
+        return res;
       }
 
-      // クォータ切れなら次のキーへ
       if (response.status === 403 && isQuotaExceeded(data)) {
         continue;
       }
 
-      // その他のエラーはそのまま返す
       return NextResponse.json(data, { status: response.status });
     } catch {
-      // ネットワークエラーは次のキーへ
       continue;
     }
   }
